@@ -2,11 +2,10 @@
 Main Menu allowing User Selection Script for testing Wintel processes to generate events that are then logged in Splunk.
 
 Author: Alasdair Wood
-Version: 1.0
+Version: 1.00
 Date-Created: 20th August 2021
 
 Version Control:
-     v1.00: Initial release.  Alasdair Wood, 1st September 2021
      v1.01: Added Notepad execution with black listed account.  Alasdair Wood. 6th Sept 2021
      v1.02: Added Clearing Event Logs.  Alasdair Wood. 28th Oct 2021
      v1.03: Added System Time change and Server reboot.  Alasdair Wood. 9th Nov 2021
