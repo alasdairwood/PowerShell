@@ -6,9 +6,11 @@ Version: 1.0
 Date-Created: 20th August 2021
 
 Version Control:
-   v1.01: Added Notepad execution with black listed account. Alasdair Wood. 6th Sept 2021
-   v1.02: Added Clearing Event Logs. Alasdair Wood. 28th Oct 2021
-   v1.03: Added System Time change. Alasdair Wood. 9th Nov 2021 
+     v1.00: Initial release.  Alasdair Wood, 1st September 2021
+     v1.01: Added Notepad execution with black listed account.  Alasdair Wood. 6th Sept 2021
+     v1.02: Added Clearing Event Logs.  Alasdair Wood. 28th Oct 2021
+     v1.03: Added System Time change and Server reboot.  Alasdair Wood. 9th Nov 2021
+     v1.04: Added test using disabled account.  Alasdair Wood, 1st Febraru 2022
 #endregion
 
 function Show-Menu
@@ -29,9 +31,9 @@ function Show-Menu
 Function winteltests
 {
      #Define Variables
-     $lclapproveduser="nwgappuser"
-     $lclblklistuser="nwgblkuser"
-     $lclnewusername="nwglclnewuser"
+     $lclapproveduser = "nwgappuser"
+     $lclblklistuser = "nwgblkuser"
+     $lclnewusername = "nwglclnewuser"
 
      #Ask for number of seconds to wait between steps
      $seconds = Read-Host "Please enter number of seconds to wait between steps"
