@@ -3,7 +3,7 @@ Main Menu allowing User Selection Script for testing Wintel processes to generat
 
 Author: Alasdair Wood
 Version: 1.0
-Date Created: 20th August 2021
+Date-Created: 20th August 2021
 
 Version Control:
    v1.01: Added Notepad execution with black listed account. Alasdair Wood. 6th Sept 2021
