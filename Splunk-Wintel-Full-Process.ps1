@@ -1,16 +1,28 @@
-#region
-Main Menu allowing User Selection Script for testing Wintel processes to generate events that are then logged in Splunk.
+#Requires -Version 2
 
-Author: Alasdair Wood
-Version: 1.00
-Date-Created: 20th August 2021
+<#
+.SYNOPSIS
+     Performs automated Wintel security tasks.
 
-Version Control:
-     v1.01: Added Notepad execution with black listed account.  Alasdair Wood. 6th Sept 2021
-     v1.02: Added Clearing Event Logs.  Alasdair Wood. 28th Oct 2021
-     v1.03: Added System Time change and Server reboot.  Alasdair Wood. 9th Nov 2021
-     v1.04: Added test using disabled account.  Alasdair Wood, 1st Febraru 2022
-#endregion
+.DESCRIPTION
+     A number of automated tasks are performed to chack security on wintel servers.  These tasks logs events which ultimately report to Splunk.
+
+.INPUTS
+     None.  You cannot pipe objects to Splunk-WIntel-Full-Process,ps1
+
+.OUTPUTS
+     The Windows event logs will populate with events relating to the tasks being run.
+
+.EXAMPLE
+     PS> .\Splunk_Wintel_Full_Process.ps1
+
+.NOTES
+     Version:            1.00
+     Author:             Alasdair Wood
+     Date-Created:       20th August 2021
+     Purpose / Change:   Initial script development
+
+#>
 
 function Show-Menu
 {
