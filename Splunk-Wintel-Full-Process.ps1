@@ -296,7 +296,7 @@ Function splunkreportstests
     Write-Host "Step 4: Testing Approved Privileged Access using account $user......" -NoNewline
     $credentials = New-Object System.Management.Automation.PSCredential -ArgumentList @($user,(ConvertTo-SecureString -String $password -AsPlainText -Force))
     Start-Process -FilePath 'Notepad.exe' -Credential $credentials -WorkingDirectory 'C:\Windows\System32' -WindowStyle Hidden
-   Start-Sleep -s 3
+    Start-Sleep -s 3
     Stop-Process -Name "notepad" -force
     Start-Sleep -s 3
     Write-Host "Done !`n" -ForegroundColor Green
