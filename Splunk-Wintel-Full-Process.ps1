@@ -242,10 +242,10 @@ Function alertwinteltests
     #Create a RunOnce item to rerun tis script upon server reboot and login
     $scriptpath
     $runoncekey = "HKLM:\Software\Microsoft\Windows\CurrentVersion\RunOnce"
-    Set-ItemProperty $runoncekey "NextRun" ('C:\Windows\System32\WindowsPowerShell\v1.0\PwerShell.exe -executionPolicy Unrestricted ' + "`"$scriptpath`"")
+    Set-ItemProperty $runoncekey "NextRun" ('C:\Windows\System32\WindowsPowerShell\v1.0\PowerShell.exe -executionPolicy Unrestricted ' + "`"$scriptpath`"")
 
     #Restart the Server
-    Write-Warning "The Server will now be restarted. You will be logged out."
+    Write-Warning "Server restarting. You will be logged out. This script will continue running after login."
     Start-Sleep -s 10
     Restart-Computer -Force
 }
@@ -287,7 +287,7 @@ Function splunkreportstests
 
     #Wintel AIS Sox 1d AUS01 Device Shutdown or Reboot 2008_2012_2016
     $runoncekey = "HKLM:\Software\Microsoft\Windows\CurrentVersion\RunOnce"
-    Set-ItemProperty $runoncekey "NextRun" ('C:\Windows\System32\WindowsPowerShell\v1.0\PwerShell.exe -executionPolicy Unrestricted ' + "`"$scriptpath`"")
+    Set-ItemProperty $runoncekey "NextRun" ('C:\Windows\System32\WindowsPowerShell\v1.0\PowerShell.exe -executionPolicy Unrestricted ' + "`"$scriptpath`"")
     Write-Host "Step 3: Server restarting. You will be logged out. This script will continue running after login." -ForegroundColor Red
     Start-Sleep -s 5
     Restart-Computer -Force
