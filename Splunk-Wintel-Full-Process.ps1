@@ -250,7 +250,7 @@ Function alertwinteltests
     Restart-Computer -Force
 }
 
-Function reportwinteltests
+Function splunkreportstests
 {
     #Define Variables
     $user="reportsuser"
@@ -264,9 +264,9 @@ Function reportwinteltests
     #Create Local Accounts required for testing process.
     Clear-Host
     Write-Host "Pre-Requisite Step: Creating Local User Accounts. Please Wait......" -NoNewline
-    New-LocalUser  -Name $user -Password (ConvertTo-SecureString $password -AsPlainText -Force)
+    $null = New-LocalUser -Name $user -Password (ConvertTo-SecureString $password -AsPlainText -Force)
     Start-Sleep -s 3
-    Write-Host "Done !" -ForegroundColor Green
+    Write-Host "Done !`n" -ForegroundColor Green
     Start-Sleep -s $seconds
 
     #Wintel AIS Sox 1d AMA06 Account Modified Password 2008_2012_2016
@@ -327,7 +327,7 @@ do
           '2'
           {
                Clear-Host
-               reportwinteltests
+               splunkreportstests
           }
           'q'
           {
