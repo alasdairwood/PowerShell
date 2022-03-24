@@ -1,230 +1,340 @@
-#Requires -Version 2
+#requires -version 2
 
 <#
 .SYNOPSIS
-     Performs automated Wintel security tasks.
+    Performs automated alert and report based Wintel security tasks.
 
 .DESCRIPTION
-     A number of automated tasks are performed to chack security on wintel servers.  These tasks logs events which ultimately report to Splunk.
+    A number of automated tasks are performed to check security on WINTEL servers. These tasks log events which ultimately report to SPLUNK.
+    Select option 1 and / or 2 from the menu and enter the desired number of seconds to wait between the steps.
 
 .INPUTS
-     None.  You cannot pipe objects to Splunk-WIntel-Full-Process,ps1
+    None. You cannot pipe objects to Splunk-Wintel-Full-Process.ps1
 
 .OUTPUTS
-     The Windows event logs will populate with events relating to the tasks being run.
+    The Windows Event logs will update with events relating to the tasks being run.
 
 .EXAMPLE
-     PS> .\Splunk_Wintel_Full_Process.ps1
+    PS> .\Splunk-Wintel-Full-Process.ps1
 
 .NOTES
-     Version:            1.00
-     Author:             Alasdair Wood
-     Date-Created:       20th August 2021
-     Purpose / Change:   Initial script development
+    Version:                    1.0
+    Author:                     Alasdair Wood
+    Creation Date:              25th August 2021
+    Purpose / Change:           Initial script development
 
 #>
 
-function Show-Menu
+Function Show-Menu
 {
-     param (
-           [string]$Title = "Perform Security Checks on"
-     )
-     Clear-Host
-     Write-Output "================ $Title $env:computername ================"
-     Write-Output "`n"   
-     Write-Output "1: Run Automated Wintel Tests"
-     Write-Output "`n"
-     Write-Output "Q: Press 'Q' to quit."
-     Write-Output "`n"
+    param (
+          [string]$Title = "Perform Wintel Tests on"
+    )
+    Clear-Host
+    Write-Output "================ $Title $env:computername ================`n"    
+    Write-Output "1: Run Alert Based Wintel Tests`n"
+    Write-Output "2: Run Report Based Wintel Tests`n"
+    Write-Output "Q: Press 'Q' to quit`n"
 }
 
 #Menu Option Functions
-Function winteltests
+Function alertwinteltests
 {
-     #Define Variables
-     $lclapproveduser = "nwgappuser"
-     $lclblklistuser = "nwgblkuser"
-     $lclnewusername = "nwglclnewuser"
+    #Define Variables
+    $lclapproveduser="nwgappuser"
+    $lclblklistuser="nwgblkuser"
+    $lclnewusername="nwglclnewuser"
+    $scriptpath="C:\Scripts\Splunk-Wintel-Full-Process.ps1"
 
-     #Ask for number of seconds to wait between steps
-     $seconds = Read-Host "Please enter number of seconds to wait between steps"
+    #Ask for number of seconds to wait between steps
+    $seconds = Read-Host "Please enter number of seconds to wait between steps"
 
-     #Create Local Accounts required for testing process
-     Write-Output "`n"
-     Write-Output "Step 1: Creating Local User Accounts. Please Wait..."
-     $null = New-LocalUser  -Name $lclapproveduser -AccountNeverExpires:$true -Password ( ConvertTo-SecureString -AsPlainText -Force 'S0m3_P4$$w0rd')
-     $null = New-LocalUser  -Name $lclblklistuser -AccountNeverExpires:$true -Password ( ConvertTo-SecureString -AsPlainText -Force 'S0m3_P4$$w0rd')
-     Start-Sleep -s $seconds
+    #Create Local Accounts required for testing process
+    Clear-Host
+    Write-Host "Step 1: Creating Local User Accounts. Please Wait......" -NoNewline
+    $null = New-LocalUser  -Name $lclapproveduser -AccountNeverExpires:$true -Password ( ConvertTo-SecureString -AsPlainText -Force 'S0m3_P4$$w0rd')
+    $null = New-LocalUser  -Name $lclblklistuser -AccountNeverExpires:$true -Password ( ConvertTo-SecureString -AsPlainText -Force 'S0m3_P4$$w0rd')
+    Write-Host "Done !`n" -ForegroundColor Green
+    Start-Sleep -s $seconds
 
-     #Modify the APPROVED user account by adding to the local Administrators security group
-     Write-Output "`n"
-     Write-Output "Step 2: Modify User Account.  Adding $lclapproveduser to local Administrators security group..."
-     Add-LocalGroupMember -Group administrators -Member $lclapproveduser
-     Start-Sleep -s $seconds
+    #Modify the APPROVED user account by adding to the local Administrators security group
+    Write-Host "Step 2: Modifying User Account.  Adding $lclapproveduser to local Administrators security group......" -NoNewline
+    Add-LocalGroupMember -Group administrators -Member $lclapproveduser
+    Write-Host "Done !`n" -ForegroundColor Green
+    Start-Sleep -s $seconds
+     
+    #Modify the APPROVED user account by changing the user account name.
+    Write-Host "Step 3: Renaming user account from $lclapproveduser to $lclnewusername......" -NoNewline
+    Rename-LocalUser -Name $lclapproveduser -NewName $lclnewusername
+    Write-Host "Done !`n" -ForegroundColor Green
+    Start-Sleep -s $seconds
+    Write-Host "Step 4: Renaming user account from $lclnewusername to $lclapproveduser......" -NoNewline
+    Rename-LocalUser -Name $lclnewusername -NewName $lclapproveduser
+    Write-Host "Done !`n" -ForegroundColor Green
+    Start-Sleep -s $seconds
 
-     #Modify the APPROVED user account by changing the user account name.
-     Write-Output "`n"
-     Write-Output "Step 3: Renaming from $lclapproveduser to $lclnewusername..."
-     Rename-LocalUser -Name $lclapproveduser -NewName $lclnewusername
-     Start-Sleep -s $seconds
-     Write-Output "`n"
-     Write-Output "Step 4: Renaming from $lclnewusername to $lclapproveduser..."
-     Rename-LocalUser -Name $lclnewusername -NewName $lclapproveduser
-     Start-Sleep -s $seconds
+    #Modify the APPROVED user account by changing the password.
+    Write-Host "Step 5: Changing the password for $lclapproveduser......" -NoNewline
+    Set-LocalUser -Name $lclapproveduser -Password (ConvertTo-SecureString -AsPlainText -Force 'N3w_P4$$w0rd')
+    Write-Host "Done !`n" -ForegroundColor Green
+    Start-Sleep -s $seconds
 
-     #Modify the APPROVED user account by changing the password.
-     Write-Output "`n"
-     Write-Output "Step 5: Changing the password for $lclapproveduser..."
-     Set-LocalUser -Name $lclapproveduser -Password (ConvertTo-SecureString -AsPlainText -Force 'N3w_P4$$w0rd')
-     Start-Sleep -s $seconds
+    #Disable the APPROVED user account.
+    Write-Host "Step 6: Disabling user account $lclapproveduser......" -NoNewline
+    Disable-LocalUser -Name $lclapproveduser
+    Write-Host "Done !`n" -ForegroundColor Green
+    Start-Sleep -s $seconds
 
-     #Disable the APPROVED user account.
-     Write-Output "`n"
-     Write-Output "Step 6: Disabling user account $lclapproveduser..."
-     Disable-LocalUser -Name $lclapproveduser
-     Start-Sleep -s $seconds
+    #Enable the APPROVED user account
+    Write-Host "Step 7: Enabling user account $lclapproveduser......" -NoNewline
+    Enable-LocalUser -Name $lclapproveduser
+    Write-Host "Done !`n" -ForegroundColor Green
+    Start-Sleep -s $seconds
 
-     #Enable the APPROVED user account
-     Write-Output "`n"
-     Write-Output "Step 7: Enabling user account $lclapproveduser..."
-     Enable-LocalUser -Name $lclapproveduser
-     Start-Sleep -s $seconds
+    # Login with a blacklisted account and run the Notepad process.
+    # Ensure account used is recorded as blacklisted in AIS_Wintel-Windows-Windows-Windows 20xx-Accounts-Blacklist.
+    Write-Host "Step 8: Logging in with a Blacklisted Account called $lclblklistuser......" -NoNewline
 
-     # Login with a blacklisted account and run the Notepad process.
-     # Ensure account used is recorded as blacklisted in AIS_Wintel-Windows-Windows-Windows 20xx-Accounts-Blacklist.
+    $service = 'seclogon'
+    while ((Get-Service $service).Status -eq 'Stopped') 
+    {
+       Set-Service -Name $service -Status running -StartupType automatic
+    } 
 
-     Write-Output "`n"
-     Write-Output "Step 8: Logging in with a Blacklisted Account called NWGBLKUSER..."
+    $username = 'nwgblkuser'
+    $password = 'S0m3_P4$$w0rd'
+    Add-LocalGroupMember -Group administrators -Member $lclblklistuser
+    $credentials = New-Object System.Management.Automation.PSCredential -ArgumentList @($username,(ConvertTo-SecureString -String $password -AsPlainText -Force))
+    Start-Process -FilePath 'Notepad.exe' -Credential $credentials -WorkingDirectory 'C:\Windows\System32' -WindowStyle Hidden
+    Write-Host "Done !`n" -ForegroundColor Green
+    Start-Sleep -s $seconds
 
-     $service = 'seclogon'
+    #Test Account Modification using Security Rights
+    Write-Host "Step 9: Testing Security Rights modification using account $lclapproveduser......" -NoNewline
 
-     while ((Get-Service $service).Status -eq 'Stopped')
-     {
-        Set-Service -Name $service -Status running -StartupType automatic
-     }
+    $account = "testuser"
+    $userRight = "SeServiceLogonRight*"
 
-     $username = 'nwgblkuser'
-     $password = 'S0m3_P4$$w0rd'
-     Add-LocalGroupMember -Group administrators -Member $lclblklistuser
-     $credentials = New-Object System.Management.Automation.PSCredential -ArgumentList @($username,(ConvertTo-SecureString -String $password -AsPlainText -Force))
-     Start-Process -FilePath 'Notepad.exe' -Credential $credentials -WorkingDirectory 'C:\Windows\System32' -WindowStyle Hidden
-     Start-Sleep -s 5
-     #Set-Service -Name $service -Status stopped -StartupType Disabled
-     Stop-Process -Name "notepad" -force
-     Start-Sleep -s $seconds
-
-     #Test Privileged Access
-     Write-Output "`n"
-     Write-Output "Step 9: Testing Approved Privileged Access using account NWGAPPUSER..."
-
-     $username = 'nwgappuser'
-     $password = 'N3w_P4$$w0rd'
-
-     $credentials = New-Object System.Management.Automation.PSCredential -ArgumentList @($username,(ConvertTo-SecureString -String $password -AsPlainText -Force))
-     Start-Process -FilePath 'Notepad.exe' -Credential $credentials -WorkingDirectory 'C:\Windows\System32' -WindowStyle Hidden
-     Start-Sleep -s 5
-     Stop-Process -Name "notepad" -force
-     Start-Sleep -s $seconds
-
-     #Check Eventlog for LogonTypes 2 and 10
-     #Get-EventLog "Security" | WHERE -FilterScript {$_.EventID -eq 4624 -and $_.ReplacementStrings[8] -eq 2 -or $_.ReplacementStrings[8] -eq 10}
-     Start-Sleep -s $seconds
-
-     #Login Default Account
-     Write-Output "`n"
-     Write-Output "Step 10: Testing Login using Default Approved Account called NWGAPPUSER..."
-
-     $username = 'nwgappuser'
-     $password = 'N3w_P4$$w0rd'
-
-     $credentials = New-Object System.Management.Automation.PSCredential -ArgumentList @($username,(ConvertTo-SecureString -String $password -AsPlainText -Force))
-     Start-Process -FilePath 'Notepad.exe' -Credential $credentials -WorkingDirectory 'C:\Windows\System32' -WindowStyle Hidden
-     Start-Sleep -s 5
-     Stop-Process -Name "notepad" -force
-     Start-Sleep -s $seconds
-
-     #Attempt Login with Disabled Account...
-     Write-Output "`n"
-     Write-Output "Step 11: Testing Login using Disabled Account called $lclapproveduser..."
-     Disable-LocalUser -Name $lclapproveduser
-
-     $password = 'N3w_P4$$w0rd'
-     $credentials = New-Object System.Management.Automation.PSCredential -ArgumentList @($lclapproveduser,(ConvertTo-SecureString -String $password -AsPlainText -Force))
-
-     Start-Process -FilePath 'Notepad.exe' -Credential $credentials -WorkingDirectory 'C:\Windows\System32' -WindowStyle Hidden -ErrorAction SilentlyContinue
-     Start-Sleep -s $seconds
-     Enable-LocalUser -Name $lclapproveduser
-
-     #Test Failed Logon Attempts
-     Write-Output "`n"
-     Write-Output "Step 12: Testing failed login attempts with account called NWGAPPUSER..."
-
-     $maxattempts = 5
-     $username = 'nwgappuser'
-     $password = 'f4ls3p@ssw0rd'
-     $computer = $env:COMPUTERNAME
-
-     foreach($i in 1..$maxattempts)
-     {
-        # Write-Output $i
-        if($i -ne $maxattempts)
+    $code = (Start-Process secedit -ArgumentList "/export /areas USER_RIGHTS /cfg c:\policies.inf" -Wait -PassThru).ExitCode
+    if ($code -eq 0)
         {
-            Add-Type -AssemblyName System.DirectoryServices.AccountManagement
-            $obj = New-Object System.DirectoryServices.AccountManagement.PrincipalContext('machine',$computer)
-            $null = $obj.ValidateCredentials($username, $password)
+            $null = Write-Output "Security template exported successfully exit code $code"
         }
-     }
-     Start-Sleep -s $seconds
+    else
+        {
+            $null = Write-Output "Security template export failed exit code $code"
+        }
 
-     #Change the System Time
-     Write-Output "`n"
-     Write-Output "Step 13: Changing the System Time back 30 minutes..."
-     $null = Set-Date -Adjust -0:30:00 -DisplayHint Time
-     Start-Sleep -s $seconds
+    $sid = ((Get-LocalUser $account).SID).Value
 
-     #Remove local user accounts used for testing process
-     Write-Output "`n"
-     Write-Output "Step 14: Removing all local test accounts being used throughout this process..."
-     Remove-LocalUser -Name $lclapproveduser
-     Remove-LocalUser -Name $lclblklistuser
-     Start-Sleep -s $seconds
+    $policy = Get-Content C:\policies.inf
+    $newpol = @()
+    foreach ($line in $policy)
+        {
+            if ($line -like $userRight)
+                {
+                    $line = $line + ",*$sid"
+                }
 
-     #Clear the Event Logs
-     Write-Output "`n"
-     Write-Output "Step 15: Clearing the Event Logs on the Local Host..."
-     Get-EventLog -Logname * | ForEach-Object { Clear-EventLog $_.log }
-     Start-Sleep -s 30
+            $newpol += $line
+        }
 
-     #Notify All Steps Complete
-     Write-Output "`n"
-     Write-Host "Steps Complete" -BackgroundColor Red -ForegroundColor White
-     Start-Sleep -s 10
+    $newpol | Out-File C:\policies.inf -Force
 
-     #Restart the Server
-     Write-Output "`n"
-     Write-Warning "The Server will now be restarted. You will be logged out."
-     Start-Sleep -s 10
-     Restart-Computer -Force -WhatIf
+    $code = (Start-Process secedit -ArgumentList "/configure /db secedit.sdb /cfg C:\policies.inf /areas USER_RIGHTS /log C:\policies.log" -Wait -PassThru).ExitCode
+    if ($code -eq 0)
+        {
+            $null = Write-Output "security template imported successfully - exit code $code"
+        }
+    else
+        {
+            $null = Write-Output "security template import failed - exit code $code"
+        }
+
+    Remove-Item -Path c:\policies.inf -Force
+    Remove-Item -Path c:\policies.log -Force
+    Write-Host "Done !`n" -ForegroundColor Green
+    Start-Sleep -s $seconds
+
+    #Test Privileged Access
+    Write-Host "Step 10: Testing Approved Privileged Access using account $lclapproveduser......" -NoNewline
+    
+    $username = 'nwgappuser'
+    $password = 'N3w_P4$$w0rd'
+
+    $credentials = New-Object System.Management.Automation.PSCredential -ArgumentList @($username,(ConvertTo-SecureString -String $password -AsPlainText -Force))
+    Start-Process -FilePath 'Notepad.exe' -Credential $credentials -WorkingDirectory 'C:\Windows\System32' -WindowStyle Hidden
+    Start-Sleep -s 5
+    Stop-Process -Name "notepad" -force
+    Write-Host "Done !`n" -ForegroundColor Green
+    Start-Sleep -s $seconds
+
+    #Login Default Account
+    Write-Host "Step 11: Testing Login using Default Approved Account called $lclapproveduser......" -NoNewline
+    
+    $username = 'nwgappuser'
+    $password = 'N3w_P4$$w0rd'
+
+    $credentials = New-Object System.Management.Automation.PSCredential -ArgumentList @($username,(ConvertTo-SecureString -String $password -AsPlainText -Force))
+    Start-Process -FilePath 'Notepad.exe' -Credential $credentials -WorkingDirectory 'C:\Windows\System32' -WindowStyle Hidden
+    Start-Sleep -s 5
+    Stop-Process -Name "notepad" -force
+    Write-Host "Done !`n" -ForegroundColor Green
+    Start-Sleep -s $seconds
+
+    #Attempt Login with Disabled Account... 
+    Write-Host "Step 12: Testing Login using Disabled Account called $lclapproveduser......" -NoNewline
+    Disable-LocalUser -Name $lclapproveduser
+    
+    $password = 'N3w_P4$$w0rd'
+
+    $credentials = New-Object System.Management.Automation.PSCredential -ArgumentList @($lclapproveduser,(ConvertTo-SecureString -String $password -AsPlainText -Force))
+    Start-Process -FilePath 'Notepad.exe' -Credential $credentials -WorkingDirectory 'C:\Windows\System32' -WindowStyle Hidden -ErrorAction SilentlyContinue
+    Write-Host "Done !`n" -ForegroundColor Green
+    Start-Sleep -s $seconds
+    Enable-LocalUser -Name $lclapproveduser
+
+    #Test Failed Logon Attempts
+    Write-Host "Step 13: Testing failed login attempts with account called $lclapproveduser......" -NoNewline
+
+    $maxattempts = 5
+    $username = 'nwgappuser'
+    $password = 'f4ls3p@ssw0rd'
+
+    $computer = $env:COMPUTERNAME
+
+    foreach($i in 1..$maxattempts)
+    {
+       # Write-Output $i
+       if($i -ne $maxattempts)
+       {
+           Add-Type -AssemblyName System.DirectoryServices.AccountManagement
+           $obj = New-Object System.DirectoryServices.AccountManagement.PrincipalContext('machine',$computer)
+           $null = $obj.ValidateCredentials($username, $password) 
+       }
+    }
+    Write-Host "Done !`n" -ForegroundColor Green
+    Start-Sleep -s $seconds
+
+    #Change the System Time
+    Write-Host "Step 14: Changing the System Time back 30 minutes......" -NoNewline
+    $null = Set-Date -Adjust -0:30:00 -DisplayHint Time
+    Write-Host "Done !`n" -ForegroundColor Green
+    Start-Sleep -s $seconds
+
+    #Remove local user accounts used for testing process
+    Write-Host "Step 15: Removing all local test accounts being used throughout this process......" -NoNewline
+    Remove-LocalUser -Name $lclapproveduser
+    Remove-LocalUser -Name $lclblklistuser
+    Write-Host "Done !`n" -ForegroundColor Green
+    Start-Sleep -s $seconds
+
+    #Clear the Event Logs
+    Write-Host "Step 16: Clearing the Event Logs on the Local Host......" -NoNewline
+    Get-EventLog -Logname * | ForEach-Object { Clear-EventLog $_.log }
+    Write-Host "Done !`n" -ForegroundColor Green
+    Start-Sleep -s 10
+
+    #Notify All Steps Complete
+    Write-Host "Steps Complete" -BackgroundColor Red -ForegroundColor White
+    Start-Sleep -s 10
+
+    #Create a RunOnce item to rerun tis script upon server reboot and login
+    $scriptpath
+    $runoncekey = "HKLM:\Software\Microsoft\Windows\CurrentVersion\RunOnce"
+    Set-ItemProperty $runoncekey "NextRun" ('C:\Windows\System32\WindowsPowerShell\v1.0\PwerShell.exe -executionPolicy Unrestricted ' + "`"$scriptpath`"")
+
+    #Restart the Server
+    Write-Warning "The Server will now be restarted. You will be logged out."
+    Start-Sleep -s 10
+    Restart-Computer -Force
+}
+
+Function reportwinteltests
+{
+    #Define Variables
+    $user="reportsuser"
+    $password="P@ssword1"
+    $newpassword="N3wP@ssword1"
+    $scriptpath="C:\Scripts\Splunk-Wintel-Full-Process.ps1"
+
+    #Ask for number of seconds to wait between steps
+    $seconds = Read-Host "Please enter number of seconds to wait between steps"
+
+    #Create Local Accounts required for testing process.
+    Clear-Host
+    Write-Host "Pre-Requisite Step: Creating Local User Accounts. Please Wait......" -NoNewline
+    New-LocalUser  -Name $user -Password (ConvertTo-SecureString $password -AsPlainText -Force)
+    Start-Sleep -s 3
+    Write-Host "Done !" -ForegroundColor Green
+    Start-Sleep -s $seconds
+
+    #Wintel AIS Sox 1d AMA06 Account Modified Password 2008_2012_2016
+    Write-Host "Step 1: Modifying password for $user......" -NoNewline
+    Set-LocalUser -Name $user -Password (ConvertTo-SecureString $newpassword -AsPlainText -Force)
+    Start-Sleep -s 3
+    Write-Host "Done !`n" -ForegroundColor Green
+    Start-Sleep -s $seconds
+
+    #Wintel AIS Sox 1d AMA11 Unlock or Enable Account 2008_2012_2016
+    Disable-LocalUser -Name $user
+    Start-Sleep -s 5
+    Write-Host "Step 2: Enabling user account $user......" -NoNewline
+    Enable-LocalUser -Name $user
+    Start-Sleep -s 3
+    Write-Host "Done !`n" -ForegroundColor Green
+    Start-Sleep -s $seconds
+
+    #Wintel AIS Sox 1d AUS01 Device Shutdown or Reboot 2008_2012_2016
+    $runoncekey = "HKLM:\Software\Microsoft\Windows\CurrentVersion\RunOnce"
+    Set-ItemProperty $runoncekey "NextRun" ('C:\Windows\System32\WindowsPowerShell\v1.0\PwerShell.exe -executionPolicy Unrestricted ' + "`"$scriptpath`"")
+    Write-Host "Step 3: Server restarting. You will be logged out. This script will continue running after login." -ForegroundColor Red
+    Start-Sleep -s 5
+    Restart-Computer -Force
+
+    #Wintel AIS Sox 1d MLA06 Login Privileged Account Authorised 2008_2012_2016
+    Write-Host "Step 4: Testing Approved Privileged Access using account $user......" -NoNewline
+    $credentials = New-Object System.Management.Automation.PSCredential -ArgumentList @($user,(ConvertTo-SecureString -String $password -AsPlainText -Force))
+    Start-Process -FilePath 'Notepad.exe' -Credential $credentials -WorkingDirectory 'C:\Windows\System32' -WindowStyle Hidden
+   Start-Sleep -s 3
+    Stop-Process -Name "notepad" -force
+    Start-Sleep -s 3
+    Write-Host "Done !`n" -ForegroundColor Green
+    Start-Sleep -s $seconds
+
+    #Wintel AIS Sox 1d AMA09 Account Modified Rights 2008_2012_2016
+
+    #Wintel AIS Sox 1d AMA04 Account Deletion 2008_2012_2016
+    Write-Host "Step 6: Removing all local accounts used......" -NoNewline
+    Remove-LocalUser -Name $user
+    Start-Sleep -s 3
+    Write-Host "Done !`n" -ForegroundColor Green
+    Start-Sleep -s $seconds
 }
 
 #Main Menu Loop
 do
 {
-     Show-Menu
-     $menuselection = Read-Host "Please make a selection"
-     switch ($menuselection)
-     {
-           '1'
-           {
-                Clear-Host
-                winteltests
-           }
-           'q'
-           {
-                Write-Host "Closing Session..." -BackgroundColor Red -ForegroundColor White
-                return
-           }
-     }
-     pause
+    Show-Menu
+    $menuselection = Read-Host "Please make a selection"
+    switch ($menuselection)
+    {
+          '1'
+          {
+               Clear-Host
+               alertwinteltests
+          }
+          '2'
+          {
+               Clear-Host
+               reportwinteltests
+          }
+          'q'
+          {
+               Write-Host "Closing Session..." -BackgroundColor Red -ForegroundColor White
+               return
+          }
+    }
+    pause
 }
 until ($menuselection -eq 'q')
