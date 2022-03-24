@@ -25,7 +25,7 @@
 
 #>
 
-Function Show-Menu
+Function ShowMenu
 {
     param (
           [string]$Title = "Perform Wintel Tests on"
@@ -38,12 +38,14 @@ Function Show-Menu
 }
 
 #Menu Option Functions
-Function alertwinteltests
+Function splunkalertstests
 {
     #Define Variables
-    $lclapproveduser="nwgappuser"
-    $lclblklistuser="nwgblkuser"
-    $lclnewusername="nwglclnewuser"
+    $approveduser="approveduser"
+    $blklistuser="blklistuser"
+    $newusername="newuser"
+    $password="P@ssword1"
+    $newpassword="N3wP@ssword1"
     $scriptpath="C:\Scripts\Splunk-Wintel-Full-Process.ps1"
 
     #Ask for number of seconds to wait between steps
@@ -52,48 +54,48 @@ Function alertwinteltests
     #Create Local Accounts required for testing process
     Clear-Host
     Write-Host "Step 1: Creating Local User Accounts. Please Wait......" -NoNewline
-    $null = New-LocalUser  -Name $lclapproveduser -AccountNeverExpires:$true -Password ( ConvertTo-SecureString -AsPlainText -Force 'S0m3_P4$$w0rd')
-    $null = New-LocalUser  -Name $lclblklistuser -AccountNeverExpires:$true -Password ( ConvertTo-SecureString -AsPlainText -Force 'S0m3_P4$$w0rd')
+    $null = New-LocalUser  -Name $approveduser -Password (ConvertTo-SecureString $password -AsPlainText -Force)
+    $null = New-LocalUser  -Name $blklistuser -Password (ConvertTo-SecureString $password -AsPlainText -Force)
     Write-Host "Done !`n" -ForegroundColor Green
     Start-Sleep -s $seconds
 
     #Modify the APPROVED user account by adding to the local Administrators security group
-    Write-Host "Step 2: Modifying User Account.  Adding $lclapproveduser to local Administrators security group......" -NoNewline
-    Add-LocalGroupMember -Group administrators -Member $lclapproveduser
+    Write-Host "Step 2: Modifying User Account.  Adding $approveduser to local Administrators security group......" -NoNewline
+    Add-LocalGroupMember -Group administrators -Member $approveduser
     Write-Host "Done !`n" -ForegroundColor Green
     Start-Sleep -s $seconds
      
     #Modify the APPROVED user account by changing the user account name.
-    Write-Host "Step 3: Renaming user account from $lclapproveduser to $lclnewusername......" -NoNewline
-    Rename-LocalUser -Name $lclapproveduser -NewName $lclnewusername
+    Write-Host "Step 3: Renaming user account from $approveduser to $newusername......" -NoNewline
+    Rename-LocalUser -Name $approveduser -NewName $newusername
     Write-Host "Done !`n" -ForegroundColor Green
     Start-Sleep -s $seconds
-    Write-Host "Step 4: Renaming user account from $lclnewusername to $lclapproveduser......" -NoNewline
-    Rename-LocalUser -Name $lclnewusername -NewName $lclapproveduser
+    Write-Host "Step 4: Renaming user account from $newusername to $approveduser......" -NoNewline
+    Rename-LocalUser -Name $newusername -NewName $approveduser
     Write-Host "Done !`n" -ForegroundColor Green
     Start-Sleep -s $seconds
 
     #Modify the APPROVED user account by changing the password.
-    Write-Host "Step 5: Changing the password for $lclapproveduser......" -NoNewline
-    Set-LocalUser -Name $lclapproveduser -Password (ConvertTo-SecureString -AsPlainText -Force 'N3w_P4$$w0rd')
+    Write-Host "Step 5: Changing the password for $approveduser......" -NoNewline
+    Set-LocalUser -Name $approveduser -Password (ConvertTo-SecureString $newpassword -AsPlainText -Force)
     Write-Host "Done !`n" -ForegroundColor Green
     Start-Sleep -s $seconds
 
     #Disable the APPROVED user account.
-    Write-Host "Step 6: Disabling user account $lclapproveduser......" -NoNewline
-    Disable-LocalUser -Name $lclapproveduser
+    Write-Host "Step 6: Disabling user account $approveduser......" -NoNewline
+    Disable-LocalUser -Name $approveduser
     Write-Host "Done !`n" -ForegroundColor Green
     Start-Sleep -s $seconds
 
     #Enable the APPROVED user account
-    Write-Host "Step 7: Enabling user account $lclapproveduser......" -NoNewline
-    Enable-LocalUser -Name $lclapproveduser
+    Write-Host "Step 7: Enabling user account $approveduser......" -NoNewline
+    Enable-LocalUser -Name $approveduser
     Write-Host "Done !`n" -ForegroundColor Green
     Start-Sleep -s $seconds
 
     # Login with a blacklisted account and run the Notepad process.
     # Ensure account used is recorded as blacklisted in AIS_Wintel-Windows-Windows-Windows 20xx-Accounts-Blacklist.
-    Write-Host "Step 8: Logging in with a Blacklisted Account called $lclblklistuser......" -NoNewline
+    Write-Host "Step 8: Logging in with a Blacklisted Account called $blklistuser......" -NoNewline
 
     $service = 'seclogon'
     while ((Get-Service $service).Status -eq 'Stopped') 
@@ -101,16 +103,14 @@ Function alertwinteltests
        Set-Service -Name $service -Status running -StartupType automatic
     } 
 
-    $username = 'nwgblkuser'
-    $password = 'S0m3_P4$$w0rd'
-    Add-LocalGroupMember -Group administrators -Member $lclblklistuser
-    $credentials = New-Object System.Management.Automation.PSCredential -ArgumentList @($username,(ConvertTo-SecureString -String $password -AsPlainText -Force))
+    Add-LocalGroupMember -Group administrators -Member $blklistuser
+    $credentials = New-Object System.Management.Automation.PSCredential -ArgumentList @($blklistuser,(ConvertTo-SecureString $password -AsPlainText -Force))
     Start-Process -FilePath 'Notepad.exe' -Credential $credentials -WorkingDirectory 'C:\Windows\System32' -WindowStyle Hidden
     Write-Host "Done !`n" -ForegroundColor Green
     Start-Sleep -s $seconds
 
     #Test Account Modification using Security Rights
-    Write-Host "Step 9: Testing Security Rights modification using account $lclapproveduser......" -NoNewline
+    Write-Host "Step 9: Testing Security Rights modification using account $approveduser......" -NoNewline
 
     $account = "testuser"
     $userRight = "SeServiceLogonRight*"
@@ -315,14 +315,14 @@ Function splunkreportstests
 #Main Menu Loop
 do
 {
-    Show-Menu
+    ShowMenu
     $menuselection = Read-Host "Please make a selection"
     switch ($menuselection)
     {
           '1'
           {
                Clear-Host
-               alertwinteltests
+               splunkalertstests
           }
           '2'
           {
