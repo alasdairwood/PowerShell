@@ -41,31 +41,29 @@ Function ShowMenu
 Function splunkalertstests
 {
     #Define Variables
-    $approveduser="approveduser"
-    $blklistuser="blklistuser"
-    $newusername="newuser"
-    $password="P@ssword1"
-    $newpassword="N3wP@ssword1"
+    $approveduser = "approveduser"
+    $blklistuser = "blklistuser"
+    $newusername = "newuser"
+    $password = ConvertTo-SecureString -String "P@ssword1" -AsPlainText -Force
+    $newpassword = ConvertTo-SecureString -String "N3wP@ssword1" -AsPlainText -Force
     $scriptpath="C:\Scripts\Splunk-Wintel-Full-Process.ps1"
 
     #Ask for number of seconds to wait between steps
     $seconds = Read-Host "Please enter number of seconds to wait between steps"
 
-    #Create Local Accounts required for testing process
+    #Wintel_AIS_AMA01AccountCreation_2008_2012_2016
     Clear-Host
     Write-Host "Step 1: Creating Local User Accounts. Please Wait......" -NoNewline
-    $null = New-LocalUser  -Name $approveduser -Password (ConvertTo-SecureString $password -AsPlainText -Force)
-    $null = New-LocalUser  -Name $blklistuser -Password (ConvertTo-SecureString $password -AsPlainText -Force)
+    $null = New-LocalUser  -Name $approveduser -Password $password
+    $null = New-LocalUser  -Name $blklistuser -Password $password
     Write-Host "Done !`n" -ForegroundColor Green
     Start-Sleep -s $seconds
 
-    #Modify the APPROVED user account by adding to the local Administrators security group
+    #Wintel_AIS_AMA07OwnAccountModified_2008_2012_2016
     Write-Host "Step 2: Modifying User Account.  Adding $approveduser to local Administrators security group......" -NoNewline
     Add-LocalGroupMember -Group administrators -Member $approveduser
     Write-Host "Done !`n" -ForegroundColor Green
     Start-Sleep -s $seconds
-     
-    #Modify the APPROVED user account by changing the user account name.
     Write-Host "Step 3: Renaming user account from $approveduser to $newusername......" -NoNewline
     Rename-LocalUser -Name $approveduser -NewName $newusername
     Write-Host "Done !`n" -ForegroundColor Green
@@ -75,27 +73,23 @@ Function splunkalertstests
     Write-Host "Done !`n" -ForegroundColor Green
     Start-Sleep -s $seconds
 
-    #Modify the APPROVED user account by changing the password.
+    #Wintel_AIS_AMA05AccountPasswordUnauthorised_2008_2012_2016
     Write-Host "Step 5: Changing the password for $approveduser......" -NoNewline
-    Set-LocalUser -Name $approveduser -Password (ConvertTo-SecureString $newpassword -AsPlainText -Force)
+    Set-LocalUser -Name $approveduser -Password $newpassword
     Write-Host "Done !`n" -ForegroundColor Green
     Start-Sleep -s $seconds
 
-    #Disable the APPROVED user account.
-    Write-Host "Step 6: Disabling user account $approveduser......" -NoNewline
+    #Wintel_AIS_AMA10AccountEnabledOrUnlocked_2008_2012_2016
     Disable-LocalUser -Name $approveduser
-    Write-Host "Done !`n" -ForegroundColor Green
-    Start-Sleep -s $seconds
-
-    #Enable the APPROVED user account
-    Write-Host "Step 7: Enabling user account $approveduser......" -NoNewline
+    Start-sleep -s 3
+    Write-Host "Step 6: Enabling user account $approveduser......" -NoNewline
     Enable-LocalUser -Name $approveduser
     Write-Host "Done !`n" -ForegroundColor Green
     Start-Sleep -s $seconds
 
-    # Login with a blacklisted account and run the Notepad process.
+    # Wintel_AIS_ESS02BlacklistUserLogin_2008_2012_2016
     # Ensure account used is recorded as blacklisted in AIS_Wintel-Windows-Windows-Windows 20xx-Accounts-Blacklist.
-    Write-Host "Step 8: Logging in with a Blacklisted Account called $blklistuser......" -NoNewline
+    Write-Host "Step 7: Logging in with a Blacklisted Account called $blklistuser......" -NoNewline
 
     $service = 'seclogon'
     while ((Get-Service $service).Status -eq 'Stopped') 
@@ -104,15 +98,14 @@ Function splunkalertstests
     } 
 
     Add-LocalGroupMember -Group administrators -Member $blklistuser
-    $credentials = New-Object System.Management.Automation.PSCredential -ArgumentList @($blklistuser,(ConvertTo-SecureString $password -AsPlainText -Force))
+    $credentials = New-Object -TypeName System.Management.Automation.PSCredential -ArgumentList $blklistuser, $password
     Start-Process -FilePath 'Notepad.exe' -Credential $credentials -WorkingDirectory 'C:\Windows\System32' -WindowStyle Hidden
     Write-Host "Done !`n" -ForegroundColor Green
     Start-Sleep -s $seconds
 
-    #Test Account Modification using Security Rights
-    Write-Host "Step 9: Testing Security Rights modification using account $approveduser......" -NoNewline
+    #Wintel_AIS_AMA08AccountRightsModified_2008_2012_2016
+    Write-Host "Step 8: Testing Security Rights modification using account $approveduser......" -NoNewline
 
-    $account = "testuser"
     $userRight = "SeServiceLogonRight*"
 
     $code = (Start-Process secedit -ArgumentList "/export /areas USER_RIGHTS /cfg c:\policies.inf" -Wait -PassThru).ExitCode
@@ -125,7 +118,7 @@ Function splunkalertstests
             $null = Write-Output "Security template export failed exit code $code"
         }
 
-    $sid = ((Get-LocalUser $account).SID).Value
+    $sid = ((Get-LocalUser $approveduser).SID).Value
 
     $policy = Get-Content C:\policies.inf
     $newpol = @()
@@ -156,50 +149,49 @@ Function splunkalertstests
     Write-Host "Done !`n" -ForegroundColor Green
     Start-Sleep -s $seconds
 
-    #Test Privileged Access
-    Write-Host "Step 10: Testing Approved Privileged Access using account $lclapproveduser......" -NoNewline
+    #Wintel_AIS_MLA05T1ApplicationPrivilegedAccess_2008_2012_2016
+    Write-Host "Step 9: Testing Approved Privileged Access using account $approveduser......" -NoNewline
     
-    $username = 'nwgappuser'
-    $password = 'N3w_P4$$w0rd'
+    #$username = 'nwgappuser'
+    #$password = 'N3w_P4$$w0rd'
 
-    $credentials = New-Object System.Management.Automation.PSCredential -ArgumentList @($username,(ConvertTo-SecureString -String $password -AsPlainText -Force))
+    $credentials = New-Object -TypeName System.Management.Automation.PSCredential -ArgumentList $approveduser, $password
     Start-Process -FilePath 'Notepad.exe' -Credential $credentials -WorkingDirectory 'C:\Windows\System32' -WindowStyle Hidden
     Start-Sleep -s 5
     Stop-Process -Name "notepad" -force
     Write-Host "Done !`n" -ForegroundColor Green
     Start-Sleep -s $seconds
 
-    #Login Default Account
-    Write-Host "Step 11: Testing Login using Default Approved Account called $lclapproveduser......" -NoNewline
+    #Wintel_AIS_MLA07T01LoginDefaultAccount_2008_2012_2016
+    Write-Host "Step 10: Testing Login using Default Approved Account called $approveduser......" -NoNewline
     
-    $username = 'nwgappuser'
-    $password = 'N3w_P4$$w0rd'
+    #$username = 'nwgappuser'
+    #$password = 'N3w_P4$$w0rd'
 
-    $credentials = New-Object System.Management.Automation.PSCredential -ArgumentList @($username,(ConvertTo-SecureString -String $password -AsPlainText -Force))
+    $credentials = New-Object System.Management.Automation.PSCredential -ArgumentList @($approveduser,(ConvertTo-SecureString -String $password -AsPlainText -Force))
     Start-Process -FilePath 'Notepad.exe' -Credential $credentials -WorkingDirectory 'C:\Windows\System32' -WindowStyle Hidden
     Start-Sleep -s 5
     Stop-Process -Name "notepad" -force
     Write-Host "Done !`n" -ForegroundColor Green
     Start-Sleep -s $seconds
 
-    #Attempt Login with Disabled Account... 
-    Write-Host "Step 12: Testing Login using Disabled Account called $lclapproveduser......" -NoNewline
-    Disable-LocalUser -Name $lclapproveduser
+    #Wintel_AIS_MLA08T01LoginDisabledAccount_2008_2012_2016 
+    Write-Host "Step 11: Testing Login using Disabled Account called $approveduser......" -NoNewline
+    Disable-LocalUser -Name $approveduser
     
-    $password = 'N3w_P4$$w0rd'
+    #$password = 'N3w_P4$$w0rd'
 
-    $credentials = New-Object System.Management.Automation.PSCredential -ArgumentList @($lclapproveduser,(ConvertTo-SecureString -String $password -AsPlainText -Force))
+    $credentials = New-Object System.Management.Automation.PSCredential -ArgumentList @($approveduser,(ConvertTo-SecureString -String $password -AsPlainText -Force))
     Start-Process -FilePath 'Notepad.exe' -Credential $credentials -WorkingDirectory 'C:\Windows\System32' -WindowStyle Hidden -ErrorAction SilentlyContinue
     Write-Host "Done !`n" -ForegroundColor Green
     Start-Sleep -s $seconds
-    Enable-LocalUser -Name $lclapproveduser
+    Enable-LocalUser -Name $approveduser
 
-    #Test Failed Logon Attempts
-    Write-Host "Step 13: Testing failed login attempts with account called $lclapproveduser......" -NoNewline
+    #Wintel_AIS_MLA01MultipleFailedLogons_2008_2012_2016
+    Write-Host "Step 12: Testing failed login attempts with account called $approveduser......" -NoNewline
 
     $maxattempts = 5
-    $username = 'nwgappuser'
-    $password = 'f4ls3p@ssw0rd'
+    $falsepassword = 'f4ls3p@ssw0rd'
 
     $computer = $env:COMPUTERNAME
 
@@ -210,28 +202,28 @@ Function splunkalertstests
        {
            Add-Type -AssemblyName System.DirectoryServices.AccountManagement
            $obj = New-Object System.DirectoryServices.AccountManagement.PrincipalContext('machine',$computer)
-           $null = $obj.ValidateCredentials($username, $password) 
+           $null = $obj.ValidateCredentials($approveduser, $falsepassword) 
        }
     }
     Write-Host "Done !`n" -ForegroundColor Green
     Start-Sleep -s $seconds
 
-    #Change the System Time
-    Write-Host "Step 14: Changing the System Time back 30 minutes......" -NoNewline
-    $null = Set-Date -Adjust -0:30:00 -DisplayHint Time
+    #Wintel_AIS_MAL01TimeChanged_2008_2012_2016
+    Write-Host "Step 13: Changing the System Time back 15 minutes......" -NoNewline
+    $null = Set-Date -Adjust -0:15:00 -DisplayHint Time
     Write-Host "Done !`n" -ForegroundColor Green
     Start-Sleep -s $seconds
 
-    #Remove local user accounts used for testing process
-    Write-Host "Step 15: Removing all local test accounts being used throughout this process......" -NoNewline
-    Remove-LocalUser -Name $lclapproveduser
-    Remove-LocalUser -Name $lclblklistuser
+    #Wintel_AIS_AMA03AccountDeletion_2008_2012_2016
+    Write-Host "Step 14: Removing all local test accounts being used throughout this process......" -NoNewline
+    Remove-LocalUser -Name $approveduser
+    Remove-LocalUser -Name $blklistuser
     Write-Host "Done !`n" -ForegroundColor Green
     Start-Sleep -s $seconds
 
-    #Clear the Event Logs
-    Write-Host "Step 16: Clearing the Event Logs on the Local Host......" -NoNewline
-    Get-EventLog -Logname * | ForEach-Object { Clear-EventLog $_.log }
+    #Wintel_AIS_ESS01EventLogCleared_2008_2012_2016
+    Write-Host "Step 15: Clearing the Event Logs on the Local Host......" -NoNewline
+    Get-EventLog -Logname * | ForEach-Object { Clear-EventLog $_.log } -WhatIf
     Write-Host "Done !`n" -ForegroundColor Green
     Start-Sleep -s 10
 
@@ -240,14 +232,14 @@ Function splunkalertstests
     Start-Sleep -s 10
 
     #Create a RunOnce item to rerun tis script upon server reboot and login
-    $scriptpath
+    #$scriptpath
     $runoncekey = "HKLM:\Software\Microsoft\Windows\CurrentVersion\RunOnce"
     Set-ItemProperty $runoncekey "NextRun" ('C:\Windows\System32\WindowsPowerShell\v1.0\PowerShell.exe -executionPolicy Unrestricted ' + "`"$scriptpath`"")
 
     #Restart the Server
     Write-Warning "Server restarting. You will be logged out. This script will continue running after login."
     Start-Sleep -s 10
-    Restart-Computer -Force
+    Restart-Computer -Force -WhatIf
 }
 
 Function splunkreportstests
