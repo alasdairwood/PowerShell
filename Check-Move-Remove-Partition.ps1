@@ -1,8 +1,3 @@
-# Check_Move_Remove_Partition
-# Alasdair Wood
-# 22/01/21
-# Version: 2.0
-
 #requires -version 2
 
 <#
