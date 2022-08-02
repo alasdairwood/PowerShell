@@ -1,5 +1,3 @@
-#requires -version 2
-
 <#
 .SYNOPSIS
     Performs automated alert and report based Wintel security tasks.
@@ -41,70 +39,51 @@ Function ShowMenu
 Function splunkalertstests
 {
     #Define Variables
-    $approveduser = "approveduser"
-    $blklistuser = "blklistuser"
-    $newusername = "newuser"
+    $user = "alertsuser"
+    $baduser = "baduser"
+    $newuser = "newuser"
     $password = ConvertTo-SecureString -String "P@ssword1" -AsPlainText -Force
     $newpassword = ConvertTo-SecureString -String "N3wP@ssword1" -AsPlainText -Force
-    $scriptpath="C:\Scripts\Splunk-Wintel-Full-Process.ps1"
+    $scriptpath = "C:\Scripts\Splunk-Wintel-Full-Process.ps1"
+    $outputfile = "C:\Scripts\Output.txt"
 
     #Ask for number of seconds to wait between steps
     $seconds = Read-Host "Please enter number of seconds to wait between steps"
 
     #Wintel_AIS_AMA01AccountCreation_2008_2012_2016
+    #Checking for Event Code 4720
     Clear-Host
-    Write-Host "Step 1: Creating Local User Accounts. Please Wait......" -NoNewline
-    $null = New-LocalUser  -Name $approveduser -Password $password
-    $null = New-LocalUser  -Name $blklistuser -Password $password
-    Write-Host "Done !`n" -ForegroundColor Green
-    Start-Sleep -s $seconds
-
-    #Wintel_AIS_AMA07OwnAccountModified_2008_2012_2016
-    Write-Host "Step 2: Modifying User Account.  Adding $approveduser to local Administrators security group......" -NoNewline
-    Add-LocalGroupMember -Group administrators -Member $approveduser
-    Write-Host "Done !`n" -ForegroundColor Green
-    Start-Sleep -s $seconds
-    Write-Host "Step 3: Renaming user account from $approveduser to $newusername......" -NoNewline
-    Rename-LocalUser -Name $approveduser -NewName $newusername
-    Write-Host "Done !`n" -ForegroundColor Green
-    Start-Sleep -s $seconds
-    Write-Host "Step 4: Renaming user account from $newusername to $approveduser......" -NoNewline
-    Rename-LocalUser -Name $newusername -NewName $approveduser
+    Write-Host "Creating Local User Accounts. Please Wait......" -NoNewline
+    New-LocalUser -Name $user -Password $password | Out-File -FilePath $outputfile
+    New-LocalUser  -Name $baduser -Password $password | Out-File -FilePath $outputfile -Append
     Write-Host "Done !`n" -ForegroundColor Green
     Start-Sleep -s $seconds
 
     #Wintel_AIS_AMA05AccountPasswordUnauthorised_2008_2012_2016
-    Write-Host "Step 5: Changing the password for $approveduser......" -NoNewline
-    Set-LocalUser -Name $approveduser -Password $newpassword
+    #Checking for Event Code 4723 or 4724
+    Write-Host "Changing the password for $user......" -NoNewline
+    Set-LocalUser -Name $user -Password $newpassword
     Write-Host "Done !`n" -ForegroundColor Green
     Start-Sleep -s $seconds
 
-    #Wintel_AIS_AMA10AccountEnabledOrUnlocked_2008_2012_2016
-    Disable-LocalUser -Name $approveduser
-    Start-sleep -s 3
-    Write-Host "Step 6: Enabling user account $approveduser......" -NoNewline
-    Enable-LocalUser -Name $approveduser
+    #Wintel_AIS_AMA07OwnAccountModified_2008_2012_2016 (Needs reviewed)
+    #Checking for Event Code 4704 or 4705 (need to add 4732, and drop 4704 and 4705)
+    Write-Host "Modifying User Account.  Adding $user to local Administrators security group......" -NoNewline
+    Add-LocalGroupMember -Group administrators -Member $user
+    Write-Host "Done !`n" -ForegroundColor Green
+    Start-Sleep -s $seconds
+    Write-Host "Renaming user account from $user to $newuser......" -NoNewline
+    Rename-LocalUser -Name $user -NewName $newuser
+    Write-Host "Done !`n" -ForegroundColor Green
+    Start-Sleep -s $seconds
+    Write-Host "Renaming user account from $newuser to $user......" -NoNewline
+    Rename-LocalUser -Name $newuser -NewName $user
     Write-Host "Done !`n" -ForegroundColor Green
     Start-Sleep -s $seconds
 
-    # Wintel_AIS_ESS02BlacklistUserLogin_2008_2012_2016
-    # Ensure account used is recorded as blacklisted in AIS_Wintel-Windows-Windows-Windows 20xx-Accounts-Blacklist.
-    Write-Host "Step 7: Logging in with a Blacklisted Account called $blklistuser......" -NoNewline
-
-    $service = 'seclogon'
-    while ((Get-Service $service).Status -eq 'Stopped') 
-    {
-       Set-Service -Name $service -Status running -StartupType automatic
-    } 
-
-    Add-LocalGroupMember -Group administrators -Member $blklistuser
-    $credentials = New-Object -TypeName System.Management.Automation.PSCredential -ArgumentList $blklistuser, $password
-    Start-Process -FilePath 'Notepad.exe' -Credential $credentials -WorkingDirectory 'C:\Windows\System32' -WindowStyle Hidden
-    Write-Host "Done !`n" -ForegroundColor Green
-    Start-Sleep -s $seconds
-
-    #Wintel_AIS_AMA08AccountRightsModified_2008_2012_2016
-    Write-Host "Step 8: Testing Security Rights modification using account $approveduser......" -NoNewline
+    #Wintel_AIS_AMA08AccountRightsModified_2008_2012_2016 (Needs reviewed)
+    #Checking for Event Code 4704 or 4705 or 4732 (need to drop 4732 from this check)
+    Write-Host "Testing Security Rights modification using account $user......" -NoNewline
 
     $userRight = "SeServiceLogonRight*"
 
@@ -118,7 +97,7 @@ Function splunkalertstests
             $null = Write-Output "Security template export failed exit code $code"
         }
 
-    $sid = ((Get-LocalUser $approveduser).SID).Value
+    $sid = ((Get-LocalUser $user).SID).Value
 
     $policy = Get-Content C:\policies.inf
     $newpol = @()
@@ -149,13 +128,36 @@ Function splunkalertstests
     Write-Host "Done !`n" -ForegroundColor Green
     Start-Sleep -s $seconds
 
-    #Wintel_AIS_MLA05T1ApplicationPrivilegedAccess_2008_2012_2016
-    Write-Host "Step 9: Testing Approved Privileged Access using account $approveduser......" -NoNewline
-    
-    #$username = 'nwgappuser'
-    #$password = 'N3w_P4$$w0rd'
 
-    $credentials = New-Object -TypeName System.Management.Automation.PSCredential -ArgumentList $approveduser, $password
+    #Wintel_AIS_AMA10AccountEnabledOrUnlocked_2008_2012_2016
+    #Checking for 4722 or 4767
+    Disable-LocalUser -Name $user
+    Write-Host "Enabling user account $user......" -NoNewline
+    Enable-LocalUser -Name $user
+    Write-Host "Done !`n" -ForegroundColor Green
+    Start-Sleep -s $seconds
+
+    # Wintel_AIS_ESS02BlacklistUserLogin_2008_2012_2016
+    #Checking for Event Code 4624
+    # Ensure account used is recorded as blacklisted in AIS_Wintel-Windows-Windows-Windows 20xx-Accounts-Blacklist.
+    Write-Host "Logging in with a Blacklisted Account called $baduser......" -NoNewline
+
+    $service = 'seclogon'
+    while ((Get-Service $service).Status -eq 'Stopped') 
+    {
+       Set-Service -Name $service -Status running -StartupType automatic
+    } 
+
+    Add-LocalGroupMember -Group administrators -Member $baduser
+    $credentials = New-Object -TypeName System.Management.Automation.PSCredential -ArgumentList $baduser, $password
+    Start-Process -FilePath 'Notepad.exe' -Credential $credentials -WorkingDirectory 'C:\Windows\System32' -WindowStyle Hidden
+    Write-Host "Done !`n" -ForegroundColor Green
+    Start-Sleep -s $seconds
+
+    #Wintel_AIS_MLA05T1ApplicationPrivilegedAccess_2008_2012_2016
+    #Checking for Event Code 4624
+    Write-Host "Testing Approved Privileged Access using account $user......" -NoNewline
+    $credentials = New-Object -TypeName System.Management.Automation.PSCredential -ArgumentList $user, $newpassword
     Start-Process -FilePath 'Notepad.exe' -Credential $credentials -WorkingDirectory 'C:\Windows\System32' -WindowStyle Hidden
     Start-Sleep -s 5
     Stop-Process -Name "notepad" -force
@@ -163,32 +165,28 @@ Function splunkalertstests
     Start-Sleep -s $seconds
 
     #Wintel_AIS_MLA07T01LoginDefaultAccount_2008_2012_2016
-    Write-Host "Step 10: Testing Login using Default Approved Account called $approveduser......" -NoNewline
-    
-    #$username = 'nwgappuser'
-    #$password = 'N3w_P4$$w0rd'
-
-    $credentials = New-Object System.Management.Automation.PSCredential -ArgumentList @($approveduser,(ConvertTo-SecureString -String $password -AsPlainText -Force))
+    #Checking for Event Code 4624
+    Write-Host "Testing Login using Default Approved Account called $user......" -NoNewline
+    $credentials = New-Object -TypeName System.Management.Automation.PSCredential -ArgumentList $user, $newpassword
     Start-Process -FilePath 'Notepad.exe' -Credential $credentials -WorkingDirectory 'C:\Windows\System32' -WindowStyle Hidden
     Start-Sleep -s 5
     Stop-Process -Name "notepad" -force
     Write-Host "Done !`n" -ForegroundColor Green
     Start-Sleep -s $seconds
 
-    #Wintel_AIS_MLA08T01LoginDisabledAccount_2008_2012_2016 
-    Write-Host "Step 11: Testing Login using Disabled Account called $approveduser......" -NoNewline
-    Disable-LocalUser -Name $approveduser
-    
-    #$password = 'N3w_P4$$w0rd'
-
-    $credentials = New-Object System.Management.Automation.PSCredential -ArgumentList @($approveduser,(ConvertTo-SecureString -String $password -AsPlainText -Force))
-    Start-Process -FilePath 'Notepad.exe' -Credential $credentials -WorkingDirectory 'C:\Windows\System32' -WindowStyle Hidden -ErrorAction SilentlyContinue
+    #Wintel_AIS_MLA08T01LoginDisabledAccount_2008_2012_2016
+    #Checking for Event Code 4625
+    Write-Host "Testing Login using Disabled Account called $user......" -NoNewline
+    Disable-LocalUser -Name $user
+    $creds = New-Object -TypeName System.Management.Automation.PSCredential -ArgumentList $user, $newpassword
+    Start-Process -FilePath 'C:\Windows\System32\Notepad.exe' -Credential $creds -WindowStyle Hidden
     Write-Host "Done !`n" -ForegroundColor Green
     Start-Sleep -s $seconds
-    Enable-LocalUser -Name $approveduser
+    Enable-LocalUser -Name $user
 
     #Wintel_AIS_MLA01MultipleFailedLogons_2008_2012_2016
-    Write-Host "Step 12: Testing failed login attempts with account called $approveduser......" -NoNewline
+    #Checking for Event Code 4625
+    Write-Host "Testing failed login attempts with account called $user......" -NoNewline
 
     $maxattempts = 5
     $falsepassword = 'f4ls3p@ssw0rd'
@@ -202,34 +200,37 @@ Function splunkalertstests
        {
            Add-Type -AssemblyName System.DirectoryServices.AccountManagement
            $obj = New-Object System.DirectoryServices.AccountManagement.PrincipalContext('machine',$computer)
-           $null = $obj.ValidateCredentials($approveduser, $falsepassword) 
+           $null = $obj.ValidateCredentials($user, $falsepassword) 
        }
     }
     Write-Host "Done !`n" -ForegroundColor Green
     Start-Sleep -s $seconds
 
     #Wintel_AIS_MAL01TimeChanged_2008_2012_2016
-    Write-Host "Step 13: Changing the System Time back 15 minutes......" -NoNewline
+    #Checking for Event Code 4616
+    Write-Host "Changing the System Time back 15 minutes......" -NoNewline
     $null = Set-Date -Adjust -0:15:00 -DisplayHint Time
     Write-Host "Done !`n" -ForegroundColor Green
     Start-Sleep -s $seconds
 
     #Wintel_AIS_AMA03AccountDeletion_2008_2012_2016
-    Write-Host "Step 14: Removing all local test accounts being used throughout this process......" -NoNewline
-    Remove-LocalUser -Name $approveduser
-    Remove-LocalUser -Name $blklistuser
+    #Checking for Event Code 4726
+    Write-Host "Removing all local test accounts being used throughout this process......" -NoNewline
+    Remove-LocalUser -Name $user
+    Remove-LocalUser -Name $baduser
     Write-Host "Done !`n" -ForegroundColor Green
     Start-Sleep -s $seconds
 
     #Wintel_AIS_ESS01EventLogCleared_2008_2012_2016
-    Write-Host "Step 15: Clearing the Event Logs on the Local Host......" -NoNewline
-    Get-EventLog -Logname * | ForEach-Object { Clear-EventLog $_.log } -WhatIf
+    #Checking for Event Code 1102
+    Write-Host "Clearing the Event Logs on the Local Host......" -NoNewline
+    Get-EventLog -Logname * | ForEach-Object { Clear-EventLog $_.log }
     Write-Host "Done !`n" -ForegroundColor Green
-    Start-Sleep -s 10
+    Start-Sleep -s 5
 
     #Notify All Steps Complete
     Write-Host "Steps Complete" -BackgroundColor Red -ForegroundColor White
-    Start-Sleep -s 10
+    Start-Sleep -s 5
 
     #Create a RunOnce item to rerun tis script upon server reboot and login
     #$scriptpath
@@ -238,7 +239,7 @@ Function splunkalertstests
 
     #Restart the Server
     Write-Warning "Server restarting. You will be logged out. This script will continue running after login."
-    Start-Sleep -s 10
+    Start-Sleep -s 5
     Restart-Computer -Force -WhatIf
 }
 
@@ -246,8 +247,8 @@ Function splunkreportstests
 {
     #Define Variables
     $user="reportsuser"
-    $password="P@ssword1"
-    $newpassword="N3wP@ssword1"
+    $password = ConvertTo-SecureString -String "P@ssword1" -AsPlainText -Force
+    $newpassword = ConvertTo-SecureString -String "N3wP@ssword1" -AsPlainText -Force
     $scriptpath="C:\Scripts\Splunk-Wintel-Full-Process.ps1"
 
     #Ask for number of seconds to wait between steps
@@ -262,31 +263,40 @@ Function splunkreportstests
     Start-Sleep -s $seconds
 
     #Wintel AIS Sox 1d AMA06 Account Modified Password 2008_2012_2016
-    Write-Host "Step 1: Modifying password for $user......" -NoNewline
-    Set-LocalUser -Name $user -Password (ConvertTo-SecureString $newpassword -AsPlainText -Force)
+    #Checking for Event Code 4723 or 4724
+    Write-Host "Modifying password for $user......" -NoNewline
+    Set-LocalUser -Name $user -Password $newpassword
     Start-Sleep -s 3
     Write-Host "Done !`n" -ForegroundColor Green
     Start-Sleep -s $seconds
 
     #Wintel AIS Sox 1d AMA11 Unlock or Enable Account 2008_2012_2016
+    #Checking for Event Code 4722 or 4767
     Disable-LocalUser -Name $user
-    Start-Sleep -s 5
-    Write-Host "Step 2: Enabling user account $user......" -NoNewline
+    Write-Host "Enabling user account $user......" -NoNewline
     Enable-LocalUser -Name $user
     Start-Sleep -s 3
     Write-Host "Done !`n" -ForegroundColor Green
     Start-Sleep -s $seconds
 
     #Wintel AIS Sox 1d AUS01 Device Shutdown or Reboot 2008_2012_2016
+    #Checking for Event Code 4608 or 4609
     $runoncekey = "HKLM:\Software\Microsoft\Windows\CurrentVersion\RunOnce"
     Set-ItemProperty $runoncekey "NextRun" ('C:\Windows\System32\WindowsPowerShell\v1.0\PowerShell.exe -executionPolicy Unrestricted ' + "`"$scriptpath`"")
-    Write-Host "Step 3: Server restarting. You will be logged out. This script will continue running after login." -ForegroundColor Red
+    Write-Host "Server restarting. You will be logged out. This script will continue running after login." -ForegroundColor Red
     Start-Sleep -s 5
-    Restart-Computer -Force
+    Restart-Computer -Force -WhatIf
 
     #Wintel AIS Sox 1d MLA06 Login Privileged Account Authorised 2008_2012_2016
-    Write-Host "Step 4: Testing Approved Privileged Access using account $user......" -NoNewline
-    $credentials = New-Object System.Management.Automation.PSCredential -ArgumentList @($user,(ConvertTo-SecureString -String $password -AsPlainText -Force))
+    #Checking for Event Code 4624
+    Write-Host "Testing Approved Privileged Access using account $user......" -NoNewline
+        $service = 'seclogon'
+    while ((Get-Service $service).Status -eq 'Stopped') 
+    {
+       Set-Service -Name $service -Status running -StartupType automatic
+    } 
+    Add-LocalGroupMember -Group administrators -Member $user
+    $credentials = New-Object -TypeName System.Management.Automation.PSCredential -ArgumentList $user, $newpassword
     Start-Process -FilePath 'Notepad.exe' -Credential $credentials -WorkingDirectory 'C:\Windows\System32' -WindowStyle Hidden
     Start-Sleep -s 3
     Stop-Process -Name "notepad" -force
@@ -295,9 +305,15 @@ Function splunkreportstests
     Start-Sleep -s $seconds
 
     #Wintel AIS Sox 1d AMA09 Account Modified Rights 2008_2012_2016
+    #Checking for 4704 or 4705 or 4732 (need to drop 4704 and 4705)
+    Write-Host "Modifying User Account.  Adding $user to local Administrators security group......" -NoNewline
+    Add-LocalGroupMember -Group administrators -Member $user
+    Write-Host "Done !`n" -ForegroundColor Green
+    Start-Sleep -s $seconds
 
     #Wintel AIS Sox 1d AMA04 Account Deletion 2008_2012_2016
-    Write-Host "Step 6: Removing all local accounts used......" -NoNewline
+    #Checking for Event Code 4726
+    Write-Host "Removing all local accounts used......" -NoNewline
     Remove-LocalUser -Name $user
     Start-Sleep -s 3
     Write-Host "Done !`n" -ForegroundColor Green
