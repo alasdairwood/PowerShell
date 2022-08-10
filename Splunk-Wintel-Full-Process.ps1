@@ -46,6 +46,7 @@ Function splunkalertstests
     $newpassword = ConvertTo-SecureString -String "N3wP@ssword1" -AsPlainText -Force
     $scriptpath = "C:\Scripts\Splunk-Wintel-Full-Process.ps1"
     $outputfile = "C:\Scripts\Output.txt"
+    $count = 0
 
     #Ask for number of seconds to wait between steps
     $seconds = Read-Host "Please enter number of seconds to wait between steps"
@@ -53,11 +54,17 @@ Function splunkalertstests
     #Wintel_AIS_AMA01AccountCreation_2008_2012_2016
     #Checking for Event Code 4720
     Clear-Host
-    Write-Host "Creating Local User Accounts. Please Wait......" -NoNewline
-    New-LocalUser -Name $user -Password $password | Out-File -FilePath $outputfile
-    New-LocalUser  -Name $baduser -Password $password | Out-File -FilePath $outputfile -Append
-    Write-Host "Done !`n" -ForegroundColor Green
-    Start-Sleep -s $seconds
+    try {
+        Write-Host "Creating Local User Accounts. Please Wait......" -NoNewline
+        New-LocalUser -Name $user -Password $password | Out-File -FilePath $outputfile
+        New-LocalUser  -Name $baduser -Password $password | Out-File -FilePath $outputfile -Append
+        Write-Host "Done !`n" -ForegroundColor Green
+        $count = $count + 1
+        Start-Sleep -s $seconds
+    }
+    catch {
+        Write-Host "Failed: $($error[0])" -ForegroundColor Red
+    }
 
     #Wintel_AIS_AMA05AccountPasswordUnauthorised_2008_2012_2016
     #Checking for Event Code 4723 or 4724
