@@ -64,7 +64,7 @@ Function splunkalertstests
         Start-Sleep -s $seconds
     }
     catch {
-        Write-Host "Failed: $($error[0])" -ForegroundColor Red
+        Write-Host "Failed !`n" -ForegroundColor Red
 		$badcount = $badcount + 1
     }
 
@@ -78,7 +78,7 @@ Function splunkalertstests
         Start-Sleep -s $seconds
     }
     catch {
-        Write-Host "Failed: $($error[0])" -ForegroundColor Red
+        Write-Host "Failed !`n" -ForegroundColor Red
 		$badcount = $badcount + 1
     }
 
@@ -100,7 +100,7 @@ Function splunkalertstests
         Start-Sleep -s $seconds
     }
     catch {
-        Write-Host "Failed: $($error[0])" -ForegroundColor Red
+        Write-Host "Failed !`n" -ForegroundColor Red
         $badcount = $badcount + 1
     }
 
@@ -150,7 +150,7 @@ Function splunkalertstests
         Start-Sleep -s $seconds
     }
     catch {
-        Write-Host "Failed: $($error[0])" -ForegroundColor Red
+        Write-Host "Failed !`n" -ForegroundColor Red
         $badcount = $badcount + 1
     }
     
@@ -165,7 +165,7 @@ Function splunkalertstests
         Start-Sleep -s $seconds
     }
     catch {
-        Write-Host "Failed: $($error[0])" -ForegroundColor Red
+        Write-Host "Failed !`n" -ForegroundColor Red
         $badcount = $badcount + 1
     }
 
@@ -187,7 +187,7 @@ Function splunkalertstests
         Start-Sleep -s $seconds
     }
     catch {
-        Write-Host "Failed: $($error[0])" -ForegroundColor Red
+        Write-Host "Failed !`n" -ForegroundColor Red
         $badcount = $badcount + 1
     }
 
@@ -204,7 +204,7 @@ Function splunkalertstests
         Start-Sleep -s $seconds
     }
     catch {
-        Write-Host "Failed: $($error[0])" -ForegroundColor Red
+        Write-Host "Failed !`n" -ForegroundColor Red
         $badcount = $badcount + 1
     }
 
@@ -221,7 +221,7 @@ Function splunkalertstests
         Start-Sleep -s $seconds
     }
     catch {
-        Write-Host "Failed: $($error[0])" -ForegroundColor Red
+        Write-Host "Failed !`n" -ForegroundColor Red
         $badcount = $badcount + 1
     }
 
@@ -264,7 +264,7 @@ Function splunkalertstests
         Start-Sleep -s $seconds
     }
     catch {
-        Write-Host "Failed: $($error[0])" -ForegroundColor Red
+        Write-Host "Failed !`n" -ForegroundColor Red
         $badcount = $badcount + 1
     }
 
@@ -278,7 +278,7 @@ Function splunkalertstests
         Start-Sleep -s $seconds
     }
     catch {
-        Write-Host "Failed: $($error[0])" -ForegroundColor Red
+        Write-Host "Failed !`n" -ForegroundColor Red
         $badcount = $badcount + 1
     }
 
@@ -293,7 +293,7 @@ Function splunkalertstests
         Start-Sleep -s $seconds
     }
     catch {
-        Write-Host "Failed: $($error[0])" -ForegroundColor Red
+        Write-Host "Failed !`n" -ForegroundColor Red
         $badcount = $badcount + 1
     }
 
@@ -307,7 +307,7 @@ Function splunkalertstests
         Start-Sleep -s 5
     }
     catch {
-        Write-Host "Failed: $($error[0])" -ForegroundColor Red
+        Write-Host "Failed !`n" -ForegroundColor Red
         $badcount = $badcount + 1
     }
 
@@ -352,7 +352,7 @@ Function splunkreportstests
         Start-Sleep -s $seconds
     }
     catch {
-        Write-Host "Failed: $($error[0])" -ForegroundColor Red
+        Write-Host "Failed !`n" -ForegroundColor Red
         $badcount = $badcount + 1
     }
 
@@ -367,7 +367,7 @@ Function splunkreportstests
         Start-Sleep -s $seconds
     }
     catch {
-        Write-Host "Failed: $($error[0])" -ForegroundColor Red
+        Write-Host "Failed !`n" -ForegroundColor Red
         $badcount = $badcount + 1
     }
 
@@ -383,7 +383,7 @@ Function splunkreportstests
         Start-Sleep -s $seconds
     }
     catch {
-        Write-Host "Failed: $($error[0])" -ForegroundColor Red
+        Write-Host "Failed !`n" -ForegroundColor Red
         $badcount = $badcount + 1
     }
 
@@ -398,7 +398,7 @@ Function splunkreportstests
         $goodcount = $goodcount + 1
     }
     catch {
-        Write-Host "Failed: $($error[0])" -ForegroundColor Red
+        Write-Host "Failed !`n" -ForegroundColor Red
         $badcount = $badcount + 1
     }
 
@@ -422,7 +422,7 @@ Function splunkreportstests
         Start-Sleep -s $seconds
     }
     catch {
-        Write-Host "Failed: $($error[0])" -ForegroundColor Red
+        Write-Host "Failed !`n" -ForegroundColor Red
         $badcount = $badcount + 1
     }
 
@@ -436,7 +436,7 @@ Function splunkreportstests
         Start-Sleep -s $seconds
     }
     catch {
-        Write-Host "Failed: $($error[0])" -ForegroundColor Red
+        Write-Host "Failed !`n" -ForegroundColor Red
         $badcount = $badcount + 1
     }
 
@@ -451,7 +451,7 @@ Function splunkreportstests
         Start-Sleep -s $seconds
     }
     catch {
-        Write-Host "Failed: $($error[0])" -ForegroundColor Red
+        Write-Host "Failed !`n" -ForegroundColor Red
         $badcount = $badcount + 1
     }
 
