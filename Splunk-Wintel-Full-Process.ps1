@@ -238,7 +238,7 @@ Function splunkalertstests
         Enable-LocalUser -Name $user
     }
     catch {
-        Write-Host "Failed: $($error[0])" -ForegroundColor Red
+        Write-Host "Failed !`n" -ForegroundColor Red
         $badcount = $badcount + 1
     }
 
