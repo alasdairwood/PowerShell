@@ -44,7 +44,7 @@ Function splunkalertstests
     $newuser = "newuser"
     $password = ConvertTo-SecureString -String "P@ssword1" -AsPlainText -Force
     $newpassword = ConvertTo-SecureString -String "N3wP@ssword1" -AsPlainText -Force
-    $scriptpath = "C:\Scripts\Splunk-Wintel-Full-Process.ps1"
+    $scriptpath = "C:\Scripts\WintelServerChecks.ps1"
     $outputfile = "C:\Scripts\Output.txt"
     $goodcount = 0
 	$badcount = 0
