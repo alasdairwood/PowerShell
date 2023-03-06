@@ -13,7 +13,7 @@ while ($true) {
 
     # Check if the user selected an option or quit
     if ($menuselection -eq "1") {
-        Write-Output "Running task for option 1..."
+        Write-Output "Running tasks for option 1..."
         # Replace this with the task to run for option 1
         # Define the usernames of the new user accounts to create
         $usernames = @("user1", "user2", "user3")
