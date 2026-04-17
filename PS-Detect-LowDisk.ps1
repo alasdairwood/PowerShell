@@ -5,7 +5,7 @@ Returns exit 1 when disk space is below threshold (trigger remediation).
 #>
 
 $DriveLetter = "C:"
-$MinFreeGB   = 70          # Trigger remediation if free space < 15 GB
+$MinFreeGB   = 15          # Trigger remediation if free space < 15 GB
 $MinFreePct  = 10          # OR trigger if free space < 10% (set to 0 to disable)
 
 try {
