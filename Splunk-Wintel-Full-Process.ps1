@@ -65,7 +65,7 @@ function Invoke-Step {
     }
 }
 
-function Ensure-ServiceRunning {
+function Confirm-ServiceRunning {
     param([Parameter(Mandatory)][string]$Name)
     $svc = Get-Service -Name $Name -ErrorAction Stop
     if ($svc.StartType -ne 'Automatic') {
