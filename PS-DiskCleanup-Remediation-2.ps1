@@ -1,4 +1,3 @@
-
 <#
 .SYNOPSIS
     Proaction Remediation script for cleaning up the local harddrive.
@@ -12,9 +11,10 @@
 .NOTES
     FileName:    Remediation.ps1
     Author:      Nickolaj Andersen
+    Updated:     Alasdair Wood
     Contact:     @NickolajA
     Created:     2024-11-25
-    Updated:     2026-04-23
+    Updated:     2026-04-27
 
     Version history:
     1.0.0 - (2024-11-25) Script created
@@ -23,6 +23,8 @@
             - Clean Windows\Temp folder content immediately
             - Clean SCCM client cache content older than 7 days (COM API with folder fallback)
             - Removed unused variable $RegistryValue
+    1.2.0 - (2026-04-27) Added:
+            - Detect and remove Windows dump files (retain last 7 days by default)
 #>
 Begin {
     # Define the proactive remediation name
@@ -59,7 +61,7 @@ Process {
         # Create log folder path if it does not exist
         try {
             $LogFolderPath = Split-Path -Path $LogFilePath -Parent
-            if (-not(Test-Path -Path $LogFolderPath)) {
+            if (-not (Test-Path -Path $LogFolderPath)) {
                 New-Item -ItemType "Directory" -Path $LogFolderPath -Force -ErrorAction "Stop" | Out-Null
             }
         }
@@ -95,6 +97,9 @@ Process {
 
             # Declare variable to store system specific profiles
             $SystemProfiles = "S-1-5-18", "S-1-5-19", "S-1-5-20"
+
+            # Declare variable for reg.exe executable path (fix: ensure available for unload too)
+            $RegExecutable = Join-Path -Path $env:Windir -ChildPath "System32\reg.exe"
         }
         Process {
             # Retrieve all user profiles, exclude system specific profiles
@@ -117,7 +122,7 @@ Process {
                         # Determine if user profile is a local account
                         $LocalAccount = Get-CimInstance -ClassName "Win32_Account" -Filter "SID like '$($UserProfile.PSChildName)'"
 
-                        # Add user profile to list if it is not a system profile and matches the corporate domain name
+                        # Add user profile to list if it is not a system profile
                         if ($UserProfile.PSChildName -notin $SystemProfiles) {
                             if ($null -eq $LocalAccount) {
                                 Write-LogEntry -Value "User profile is not a local account, adding to user list" -Severity 1
@@ -137,33 +142,26 @@ Process {
                     }
                 }
 
-                # Handle user profile list construction completion output
                 Write-LogEntry -Value "User profile list construction completed" -Severity 1
             }
             catch [System.Exception] {
                 Write-LogEntry -Value "Failed to construct list of user profiles. Error message: $($_.Exception.Message)" -Severity 3
             }
 
-            # Continue if user profiles were found
             if ($UserProfileList.Count -ge 1) {
                 Write-LogEntry -Value "Total count of '$($UserProfileList.Count)' user profiles to be processed" -Severity 1
 
-                # Construct a list object to contain Outlook default profile file path for each user profile
                 $OutlookDefaultProfileFilePathList = New-Object -TypeName "System.Collections.Generic.List[System.Object]"
 
-                # Process each user profile in list and load user registry hive
                 foreach ($UserProfile in $UserProfileList) {
                     Write-LogEntry -Value "Processing current user profile for account: $($UserProfile.NTAccount)" -Severity 1
 
-                    # Load user registry hive
                     $UserRegistryHiveFilePath = Join-Path -Path $UserProfile.ProfileImagePath -ChildPath "NTUSER.DAT"
                     Write-LogEntry -Value "User registry hive local file path: $($UserRegistryHiveFilePath)" -Severity 1
 
-                    # Check if user registry hive exists
                     $UserRegistryPath = "Registry::HKEY_USERS\$($UserProfile.SID)"
                     Write-LogEntry -Value "Check if user registry hive registry path exist: $($UserRegistryPath)" -Severity 1
 
-                    # Test if user registry hive is currently loaded
                     if (Test-Path -Path $UserRegistryPath) {
                         Write-LogEntry -Value "User registry hive is currently loaded: $($UserRegistryPath)" -Severity 1
                         $UserRegistryHiveLoadRequired = $false
@@ -173,18 +171,10 @@ Process {
                         $UserRegistryHiveLoadRequired = $true
                     }
 
-                    # Load user registry hive if required
                     if ($UserRegistryHiveLoadRequired -eq $true) {
-                        # Load user registry hive from local file path
                         if (Test-Path -Path $UserRegistryHiveFilePath -PathType "Leaf") {
-                            # Declare variable for reg.exe executable path
-                            $RegExecutable = Join-Path -Path $env:Windir -ChildPath "System32\reg.exe"
-
-                            # Declare arguments for reg.exe to load the current user profile registry hive
                             $RegArguments = "load ""HKEY_USERS\$($UserProfile.SID)"" ""$($UserRegistryHiveFilePath)"""
-
                             try {
-                                # Load current user profile registry hive
                                 Write-LogEntry -Value "Invoking command: $($RegExecutable) $($RegArguments)" -Severity 1
                                 Start-Process -FilePath $RegExecutable -ArgumentList $RegArguments -Wait -ErrorAction "Stop"
                                 Write-LogEntry -Value "Successfully loaded user registry hive: $($UserRegistryHiveFilePath)" -Severity 1
@@ -194,78 +184,56 @@ Process {
                             }
                         }
                         else {
-                            Write-LogEntry -Value "User registry hive could not be found: $($UserRegistryPath)" -Severity 3
+                            Write-LogEntry -Value "User registry hive could not be found: $($UserRegistryHiveFilePath)" -Severity 3
                         }
                     }
 
                     try {
-                        # Retrieve Outlook default profile value
                         Write-LogEntry -Value "Reading Outlook default profile for user: $($UserProfile.NTAccount)" -Severity 1
                         $DefaultProfile = Get-ItemPropertyValue -Path "Registry::HKEY_USERS\$($UserProfile.SID)\SOFTWARE\Microsoft\Office\16.0\Outlook" -Name "DefaultProfile" -ErrorAction "Stop"
                         Write-LogEntry -Value "Outlook default profile value: $($DefaultProfile)" -Severity 1
 
-                        try {
-                            # Locate the registry key that contains the registry value named as 001f6610
-                            $DefaultProfileSettingsRegistryPath = "Registry::HKEY_USERS\$($UserProfile.SID)\SOFTWARE\Microsoft\Office\16.0\Outlook\Profiles\$($DefaultProfile)"
-                            Write-LogEntry -Value "Outlook default profile settings registry path: $($DefaultProfileSettingsRegistryPath)" -Severity 1
+                        $DefaultProfileSettingsRegistryPath = "Registry::HKEY_USERS\$($UserProfile.SID)\SOFTWARE\Microsoft\Office\16.0\Outlook\Profiles\$($DefaultProfile)"
+                        Write-LogEntry -Value "Outlook default profile settings registry path: $($DefaultProfileSettingsRegistryPath)" -Severity 1
 
-                            try {
-                                # Retrieve the registry item that contains the registry value named as 001f6610
-                                $DefaultProfileSettingsItem = Get-ChildItem -Path $DefaultProfileSettingsRegistryPath -ErrorAction "Stop" | Where-Object { $PSItem.Property -like "001f6610" }
-                                if ($null -ne $DefaultProfileSettingsItem) {
-                                    # Declare variable for Outlook default profile settings registry path
-                                    $DefaultProfileSettingsPath = Join-Path -Path "Registry::" -ChildPath $DefaultProfileSettingsItem.Name
-                                    Write-LogEntry -Value "Outlook default profile settings item path: $($DefaultProfileSettingsPath)" -Severity 1
+                        $DefaultProfileSettingsItem = Get-ChildItem -Path $DefaultProfileSettingsRegistryPath -ErrorAction "Stop" | Where-Object { $PSItem.Property -like "001f6610" }
+                        if ($null -ne $DefaultProfileSettingsItem) {
+                            $DefaultProfileSettingsPath = Join-Path -Path "Registry::" -ChildPath $DefaultProfileSettingsItem.Name
+                            Write-LogEntry -Value "Outlook default profile settings item path: $($DefaultProfileSettingsPath)" -Severity 1
 
-                                    if (Test-Path -Path $DefaultProfileSettingsPath) {
-                                        # Retrieve Outlook default profile file path byte value representation
-                                        $OutlookDefaultProfileByteArray = [byte[]](Get-ItemPropertyValue -Path $DefaultProfileSettingsPath -Name "001f6610")
+                            if (Test-Path -Path $DefaultProfileSettingsPath) {
+                                $OutlookDefaultProfileByteArray = [byte[]](Get-ItemPropertyValue -Path $DefaultProfileSettingsPath -Name "001f6610")
+                                $OutlookDefaultProfileFilePath = [System.Text.Encoding]::Unicode.GetString($OutlookDefaultProfileByteArray).TrimEnd([char]0)
+                                Write-LogEntry -Value "Outlook default profile file path: $($OutlookDefaultProfileFilePath)" -Severity 1
 
-                                        # Convert byte array to string
-                                        $OutlookDefaultProfileFilePath = [System.Text.Encoding]::Unicode.GetString($OutlookDefaultProfileByteArray).TrimEnd([char]0)
-                                        Write-LogEntry -Value "Outlook default profile file path: $($OutlookDefaultProfileFilePath)" -Severity 1
-
-                                        # Construct custom object to store user profile details and Outlook default profile file path
-                                        $UserProfileDetails = [PSCustomObject]@{
-                                            SID = $UserProfile.SID
-                                            NTAccount = $UserProfile.NTAccount
-                                            ProfileImagePath = $UserProfile.ProfileImagePath
-                                            OutlookDefaultProfileFilePath = $OutlookDefaultProfileFilePath
-                                        }
-
-                                        # Add Outlook default profile file path to list
-                                        $OutlookDefaultProfileFilePathList.Add($UserProfileDetails)
-                                    }
-                                    else {
-                                        Write-LogEntry -Value "Outlook default profile settings path could not be found: $($DefaultProfileSettingsPath)" -Severity 3
-                                    }
+                                $UserProfileDetails = [PSCustomObject]@{
+                                    SID = $UserProfile.SID
+                                    NTAccount = $UserProfile.NTAccount
+                                    ProfileImagePath = $UserProfile.ProfileImagePath
+                                    OutlookDefaultProfileFilePath = $OutlookDefaultProfileFilePath
                                 }
-                                else {
-                                    Write-LogEntry -Value "Registry value named as '001f6610' could not be found in any of the sub keys of: $($DefaultProfileSettingsRegistryPath)" -Severity 3
-                                }
+
+                                $OutlookDefaultProfileFilePathList.Add($UserProfileDetails)
                             }
-                            catch [System.Exception] {
-                                Write-LogEntry -Value "Failed to locate registry key that contains the registry value named as '001f6610'" -Severity 3
+                            else {
+                                Write-LogEntry -Value "Outlook default profile settings path could not be found: $($DefaultProfileSettingsPath)" -Severity 3
                             }
                         }
-                        catch [System.Exception] {
-                            Write-LogEntry -Value "Failed to determine Outlook default profile file path for user: $($UserProfile.NTAccount)" -Severity 3
+                        else {
+                            Write-LogEntry -Value "Registry value '001f6610' could not be found under: $($DefaultProfileSettingsRegistryPath)" -Severity 3
                         }
                     }
                     catch [System.Exception] {
-                        Write-LogEntry -Value "Failed to determine Outlook default profile value for user: $($UserProfile.NTAccount)" -Severity 3
+                        Write-LogEntry -Value "Failed to determine Outlook default profile details for user: $($UserProfile.NTAccount). Error: $($_.Exception.Message)" -Severity 3
                     }
 
-                    # Unload user registry hive
                     if ($UserRegistryHiveLoadRequired -eq $true) {
                         try {
-                            # Initiate garbage collection to release user registry hive
                             Write-LogEntry -Value "Initiating garbage collection before user hive unload command" -Severity 1
                             [GC]::Collect()
                             [GC]::WaitForPendingFinalizers()
                             Start-Sleep -Seconds 5
 
-                            # Unload current user profile registry hive
                             $RegArguments = "unload ""HKEY_USERS\$($UserProfile.SID)"""
                             Write-LogEntry -Value "Invoking command: $($RegExecutable) $($RegArguments)" -Severity 1
                             Start-Process -FilePath $RegExecutable -ArgumentList $RegArguments -Wait -ErrorAction "Stop"
@@ -277,7 +245,6 @@ Process {
                     }
                 }
 
-                # Handle return value
                 return $OutlookDefaultProfileFilePathList
             }
             else {
@@ -286,18 +253,16 @@ Process {
         }
     }
 
-    # ==========================
-    # NEW: User temp + Windows temp + SCCM cache cleanup functions
-    # ==========================
+    # --------------------------
+    # NEW: Helpers for temp/cache/dump cleanup
+    # --------------------------
     function Get-LocalUserProfiles {
-        # Returns profile paths for all non-system profiles (includes domain + local)
         $SystemProfiles = "S-1-5-18","S-1-5-19","S-1-5-20"
         $ProfileListKey = "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList"
         $profiles = New-Object System.Collections.Generic.List[object]
 
         try {
             Write-LogEntry -Value "Reading user profiles for temp cleanup from: $ProfileListKey" -Severity 1
-
             foreach ($sidKey in (Get-ChildItem -Path $ProfileListKey -ErrorAction Stop)) {
                 $sid = $sidKey.PSChildName
                 if ($sid -in $SystemProfiles) { continue }
@@ -323,13 +288,10 @@ Process {
     }
 
     function Clear-UserTempFolders {
-        param(
-            [int]$MinAgeDays = 0
-        )
+        param([int]$MinAgeDays = 0)
 
         Write-LogEntry -Value "Initiating cleanup of user profile temp folders (MinAgeDays=$MinAgeDays)" -Severity 1
         $profiles = Get-LocalUserProfiles
-
         if ($null -eq $profiles -or $profiles.Count -eq 0) {
             Write-LogEntry -Value "No user profiles found for user temp cleanup" -Severity 2
             return
@@ -377,7 +339,8 @@ Process {
             return
         }
 
-        Write-LogEntry -Value "Found '$((($items | Measure-Object).Count))' item(s) in Windows Temp. Attempting deletion (best effort)" -Severity 1
+        $count = ($items | Measure-Object).Count
+        Write-LogEntry -Value "Found '$count' item(s) in Windows Temp. Attempting deletion (best effort)" -Severity 1
 
         foreach ($item in $items) {
             try {
@@ -392,9 +355,7 @@ Process {
     }
 
     function Clear-SCCMClientCache {
-        param(
-            [int]$MinAgeDays = 7
-        )
+        param([int]$MinAgeDays = 7)
 
         Write-LogEntry -Value "Initiating cleanup of SCCM client cache (retain last $MinAgeDays days)" -Severity 1
 
@@ -408,7 +369,6 @@ Process {
         $deletedCount = 0
         $usedComApi = $false
 
-        # Preferred: COM API cleanup
         try {
             $ui = New-Object -ComObject "UIResource.UIResourceMgr"
             $cache = $ui.GetCacheInfo()
@@ -420,7 +380,6 @@ Process {
                 try {
                     $skip = $false
 
-                    # Respect LastReferenceTime if present
                     $refTime = $null
                     try {
                         if ($null -ne $e.LastReferenceTime -and $e.LastReferenceTime.ToString().Length -gt 0) {
@@ -432,7 +391,6 @@ Process {
                         if ($refTime -gt $cutoff) { $skip = $true }
                     }
                     else {
-                        # Fallback: check element folder LastWriteTime if possible
                         if ($null -ne $e.Location -and (Test-Path -Path $e.Location)) {
                             $locItem = Get-Item -Path $e.Location -ErrorAction SilentlyContinue
                             if ($null -ne $locItem -and $locItem.LastWriteTime -gt $cutoff) { $skip = $true }
@@ -460,7 +418,6 @@ Process {
             Write-LogEntry -Value "COM API cache cleanup unavailable/failed. Falling back to folder cleanup. Error: $($_.Exception.Message)" -Severity 2
         }
 
-        # Fallback: delete older folders/files in ccmcache
         if (-not $usedComApi) {
             $cachePath = Join-Path -Path $env:Windir -ChildPath "ccmcache"
             if (-not (Test-Path -Path $cachePath)) {
@@ -491,12 +448,77 @@ Process {
         }
     }
 
-    # ==========================
-    # Configuration for requested additions
-    # ==========================
+    # NEW: Windows dump files cleanup
+    function Clear-WindowsDumpFiles {
+        param([int]$MinAgeDays = 7)
+
+        $cutoff = (Get-Date).AddDays(-$MinAgeDays)
+        Write-LogEntry -Value "Initiating cleanup of Windows dump files (MinAgeDays=$MinAgeDays)" -Severity 1
+
+        $targets = New-Object System.Collections.Generic.List[System.IO.FileInfo]
+
+        # 1) Full memory dump
+        $memoryDump = Join-Path -Path $env:WINDIR -ChildPath "MEMORY.DMP"
+        if (Test-Path -Path $memoryDump) {
+            $fi = Get-Item -Path $memoryDump -ErrorAction SilentlyContinue
+            if ($null -ne $fi) {
+                if ($MinAgeDays -eq 0 -or $fi.LastWriteTime -lt $cutoff) { $targets.Add($fi) }
+                else { Write-LogEntry -Value "Keeping recent dump: $memoryDump (LastWriteTime=$($fi.LastWriteTime))" -Severity 1 }
+            }
+        }
+
+        # 2) Minidumps
+        $miniDir = Join-Path -Path $env:WINDIR -ChildPath "Minidump"
+        if (Test-Path -Path $miniDir) {
+            Get-ChildItem -Path $miniDir -File -Filter "*.dmp" -ErrorAction SilentlyContinue | ForEach-Object {
+                if ($MinAgeDays -eq 0 -or $_.LastWriteTime -lt $cutoff) { $targets.Add($_) }
+            }
+            Get-ChildItem -Path $miniDir -File -Filter "*.hdmp" -ErrorAction SilentlyContinue | ForEach-Object {
+                if ($MinAgeDays -eq 0 -or $_.LastWriteTime -lt $cutoff) { $targets.Add($_) }
+            }
+        }
+
+        # 3) LiveKernelReports dumps (recursive)
+        $liveDir = Join-Path -Path $env:WINDIR -ChildPath "LiveKernelReports"
+        if (Test-Path -Path $liveDir) {
+            Get-ChildItem -Path $liveDir -File -Recurse -Filter "*.dmp" -ErrorAction SilentlyContinue | ForEach-Object {
+                if ($MinAgeDays -eq 0 -or $_.LastWriteTime -lt $cutoff) { $targets.Add($_) }
+            }
+            Get-ChildItem -Path $liveDir -File -Recurse -Filter "*.hdmp" -ErrorAction SilentlyContinue | ForEach-Object {
+                if ($MinAgeDays -eq 0 -or $_.LastWriteTime -lt $cutoff) { $targets.Add($_) }
+            }
+        }
+
+        if ($targets.Count -eq 0) {
+            Write-LogEntry -Value "No dump files found matching the removal criteria" -Severity 1
+            return
+        }
+
+        # Log total size
+        $totalBytes = ($targets | Measure-Object -Property Length -Sum).Sum
+        $totalGB = [math]::Round(($totalBytes / 1GB), 2)
+        Write-LogEntry -Value "Found '$($targets.Count)' dump file(s) to remove. Total size: $totalGB GB" -Severity 1
+
+        foreach ($t in $targets) {
+            try {
+                Write-LogEntry -Value "Removing dump file: $($t.FullName)" -Severity 1
+                Remove-Item -Path $t.FullName -Force -ErrorAction Stop
+            }
+            catch {
+                Write-LogEntry -Value "Failed to remove dump file '$($t.FullName)'. Error: $($_.Exception.Message)" -Severity 2
+            }
+        }
+
+        Write-LogEntry -Value "Cleanup of Windows dump files completed (best effort)" -Severity 1
+    }
+
+    # --------------------------
+    # Configuration for additions
+    # --------------------------
     $UserTempMinAgeDays = 0        # Clean immediately
-    $SCCMCacheMinAgeDays = 7       # Keep cache content for 7 days
+    $SCCMCacheMinAgeDays = 7       # Keep SCCM cache content for 7 days
     $ClearSCCMClientCache = $true  # Toggle SCCM cache cleanup
+    $DumpMinAgeDays = 7            # Keep dump files for 7 days (set 0 to remove immediately)
 
     # Handle initial value for exit code variable
     $ExitCode = 0
@@ -520,12 +542,11 @@ Process {
             "Update Cleanup", "Temporary Files", "Delivery Optimization Files", "Previous Installations",
             "Downloaded Program Files", "Recycle Bin", "Internet Cache Files", "Device Driver Packages", "Thumbnail Cache"
         )
-
         foreach ($SageRunSetting in $SageRunSettings) {
             try {
                 Write-LogEntry -Value "Enabling '$($SageRunSetting)' sage run setting" -Severity 1
 
-                # Removed unused $RegistryValue assignment (no functional need to store output)
+                # Removed unused $RegistryValue variable assignment
                 New-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\VolumeCaches\$($SageRunSetting)" -Name "StateFlags0001" -Value 2 -PropertyType DWord -ErrorAction "Stop" | Out-Null
             }
             catch [System.Exception] {
@@ -535,17 +556,13 @@ Process {
         }
 
         try {
-            # Declare variables for scheduled task creation for path and name
             $TaskPath = "\"
             $TaskName = "Disk Cleanup"
 
-            # Check if scheduled task already exists
             $ScheduledTaskExists = Get-ScheduledTask -TaskName $TaskName -ErrorAction "SilentlyContinue"
             if ($null -ne $ScheduledTaskExists) {
                 Write-LogEntry -Value "Scheduled task already exists: $($TaskName)" -Severity 1
-
                 try {
-                    # Unregister scheduled task
                     Write-LogEntry -Value "Unregistering scheduled task: $($TaskName)" -Severity 1
                     Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction "Stop"
                 }
@@ -556,27 +573,22 @@ Process {
             }
 
             try {
-                # Construct required scheduled task objects with action, principal and settings
                 $TaskAction = New-ScheduledTaskAction -Execute "CleanMgr.exe" -Argument "/sagerun:1"
                 $TaskSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -Hidden -DontStopIfGoingOnBatteries -Compatibility "Win8" -MultipleInstances "IgnoreNew" -ErrorAction Stop
                 $TaskPrincipal = New-ScheduledTaskPrincipal -UserId "NT AUTHORITY\SYSTEM" -LogonType "ServiceAccount" -RunLevel "Highest" -ErrorAction "Stop"
 
                 try {
-                    # Register scheduled task with constructed objects
                     Write-LogEntry -Value "Registering scheduled task: $($TaskName)" -Severity 1
                     $ScheduledTask = New-ScheduledTask -Action $TaskAction -Principal $TaskPrincipal -Settings $TaskSettings -ErrorAction "Stop"
                     $ScheduledTask = Register-ScheduledTask -InputObject $ScheduledTask -TaskName $TaskName -TaskPath $TaskPath -ErrorAction "Stop"
 
                     try {
-                        # Run scheduled task
                         Write-LogEntry -Value "Running scheduled task: $($TaskName)" -Severity 1
                         Start-ScheduledTask -TaskName $TaskName -ErrorAction "Stop"
 
-                        # Construct stop watch object to measure elapsed time and define timeout of 30 minutes
                         $StopWatch = [System.Diagnostics.Stopwatch]::StartNew()
                         $Timeout = 1800
 
-                        # Wait for scheduled task to complete
                         Write-LogEntry -Value "Waiting for scheduled task to complete" -Severity 1
                         while ($StopWatch.Elapsed.TotalSeconds -lt $Timeout) {
                             $ScheduledTaskState = Get-ScheduledTask -TaskName $TaskName | Select-Object -ExpandProperty "State"
@@ -589,10 +601,7 @@ Process {
                             }
                         }
 
-                        # Stop stop watch object
                         $StopWatch.Stop()
-
-                        # Handle final log output for scheduled task completion
                         Write-LogEntry -Value "Disk Cleanup activities completed" -Severity 1
                     }
                     catch [System.Exception] {
@@ -621,29 +630,23 @@ Process {
     }
 
     try {
-        # Retrieve Outlook .ost file paths for all user profiles
         Write-LogEntry -Value "Initiating cleanup of Outlook unused .ost files" -Severity 1
         $OutlookDefaultProfileFilePathList = Get-OutlookDefaultProfileFilePathAllUserProfiles
 
         if ($null -ne $OutlookDefaultProfileFilePathList) {
-            # Find all .ost files in all users' Outlook app data folders
             $OutlookOSTFiles = Get-ChildItem -Path "$($env:SystemDrive)\Users\*\AppData\Local\Microsoft\Outlook" -Filter "*.ost" -Recurse -ErrorAction "SilentlyContinue"
             if ($null -ne $OutlookOSTFiles) {
                 Write-LogEntry -Value "Found a total of '$($OutlookOSTFiles.Count)' Outlook .ost files in all users' specific Outlook app data folder" -Severity 1
 
-                # Remove all .ost files found, except if they're in the list of default profile file paths list
                 foreach ($OutlookOSTFile in $OutlookOSTFiles) {
                     Write-LogEntry -Value "Checking if current .ost file '$($OutlookOSTFile.FullName)' is in the list of default profiles" -Severity 1
                     if ($OutlookDefaultProfileFilePathList.OutlookDefaultProfileFilePath -notcontains $OutlookOSTFile.FullName) {
-                        # Determine the count of days since the .ost file was last accessed
                         $LastAccessTime = (Get-Item -Path $OutlookOSTFile.FullName).LastAccessTime
                         $DaysSinceLastAccess = [math]::Round((New-TimeSpan -Start $LastAccessTime -End (Get-Date)).TotalDays)
                         Write-LogEntry -Value "Last access time for current .ost file: $($LastAccessTime). Days since last access: $($DaysSinceLastAccess)" -Severity 1
 
-                        # Remove .ost file if it has not been accessed within the last 90 days
                         if ($DaysSinceLastAccess -ge 90) {
                             try {
-                                # Remove .ost file
                                 Write-LogEntry -Value "Removing Outlook .ost file: $($OutlookOSTFile.FullName)" -Severity 1
                                 Remove-Item -Path $OutlookOSTFile.FullName -Force -ErrorAction "Stop"
                             }
@@ -661,7 +664,6 @@ Process {
                     }
                 }
 
-                # Handle cleanup completion log output
                 Write-LogEntry -Value "Cleanup of Outlook .ost files completed" -Severity 1
             }
             else {
@@ -674,27 +676,21 @@ Process {
         $ExitCode = 1
     }
 
-    # Locate Teams cache folders for all user profiles and clean the content of the folders
     try {
-        # Retrieve Teams cache folders for all user profiles
         Write-LogEntry -Value "Initiating cleanup of Teams cache folders" -Severity 1
         $TeamsCacheFolders = Get-ChildItem -Path "$($env:SystemDrive)\Users\*\AppData\Roaming\Microsoft\Teams\Cache" -ErrorAction "SilentlyContinue"
         if ($null -ne $TeamsCacheFolders) {
             Write-LogEntry -Value "Found a total of '$($TeamsCacheFolders.Count)' Teams cache folders in all user's specific Teams app data folder" -Severity 1
 
-            # Clean the content of all Teams cache folders found
             foreach ($TeamsCacheFolder in $TeamsCacheFolders) {
                 if (Test-Path -Path $TeamsCacheFolder.FullName) {
-                    # Get count of files and folders present in the Teams cache folder
                     $TeamsCacheFolderItems = Get-ChildItem -Path $TeamsCacheFolder.FullName -Recurse -ErrorAction "SilentlyContinue"
                     $TeamsCacheFoldersItemsCount = ($TeamsCacheFolderItems | Measure-Object).Count
                     Write-LogEntry -Value "Found a total of '$($TeamsCacheFoldersItemsCount)' items in Teams cache folder: $($TeamsCacheFolder.FullName)" -Severity 1
 
-                    # Attempt to remove each item in the Teams cache folder
                     Write-LogEntry -Value "Removing items from Teams cache folder: $($TeamsCacheFolder.FullName)" -Severity 1
                     foreach ($TeamsCacheFolderItem in $TeamsCacheFolderItems) {
                         try {
-                            # Remove item from Teams cache folder
                             Remove-Item -Path $TeamsCacheFolderItem.FullName -Recurse -Force -Confirm:$false -ErrorAction "Stop"
                         }
                         catch [System.Exception] {
@@ -707,7 +703,6 @@ Process {
                 }
             }
 
-            # Handle cleanup completion log output
             Write-LogEntry -Value "Cleanup of Teams cache folders completed" -Severity 1
         }
         else {
@@ -719,9 +714,7 @@ Process {
         $ExitCode = 1
     }
 
-    # ==========================
-    # NEW: Clean user profile temp folder content immediately
-    # ==========================
+    # NEW: User profile temp cleanup
     try {
         Clear-UserTempFolders -MinAgeDays $UserTempMinAgeDays
     }
@@ -730,9 +723,7 @@ Process {
         $ExitCode = 1
     }
 
-    # ==========================
-    # NEW: Clean Windows\Temp folder content immediately
-    # ==========================
+    # NEW: Windows Temp cleanup
     try {
         Clear-WindowsTempFolder
     }
@@ -741,9 +732,16 @@ Process {
         $ExitCode = 1
     }
 
-    # ==========================
-    # NEW: Clean SCCM cache content older than 7 days
-    # ==========================
+    # NEW: Windows dump files cleanup
+    try {
+        Clear-WindowsDumpFiles -MinAgeDays $DumpMinAgeDays
+    }
+    catch [System.Exception] {
+        Write-LogEntry -Value "Failed to process Windows dump files. Error message: $($_.Exception.Message)" -Severity 3
+        $ExitCode = 1
+    }
+
+    # NEW: SCCM cache cleanup (retain 7 days)
     if ($ClearSCCMClientCache -eq $true) {
         try {
             Clear-SCCMClientCache -MinAgeDays $SCCMCacheMinAgeDays
@@ -762,12 +760,7 @@ Process {
     $CleanedUpDiskSpace = [math]::Round($FreeDiskSpaceAfter - $FreeDiskSpaceBefore, 2)
     Write-LogEntry -Value "Cleanup activities cleaned up a total of: $($CleanedUpDiskSpace) GB" -Severity 1
 
-    # Final logging details for remediation script
     Write-LogEntry -Value "[$($ProactiveRemediationName)-Remediation] - Completed" -Severity 1
-
-    # Handle output
     Write-Output -InputObject "Cleaned up a total of: $($CleanedUpDiskSpace) GB"
-
-    # Handle exit code
     exit $ExitCode
 }
