@@ -18,6 +18,7 @@
 .NOTES
     FileName:    Detection.ps1
     Author:      Nickolaj Andersen (original)
+    Updated:     Alasdair Wood (additional detection logic and improvements)
     Updated:     2026-04-27
 
     Version history:

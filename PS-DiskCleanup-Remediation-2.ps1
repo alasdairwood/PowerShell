@@ -10,8 +10,8 @@
 
 .NOTES
     FileName:    Remediation.ps1
-    Author:      Nickolaj Andersen
-    Updated:     Alasdair Wood
+    Author:      Nickolaj Andersen (original)
+    Updated:     Alasdair Wood (additional detection logic and improvements)
     Contact:     @NickolajA
     Created:     2024-11-25
     Updated:     2026-04-27
