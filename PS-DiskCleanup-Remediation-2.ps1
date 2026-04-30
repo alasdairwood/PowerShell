@@ -450,7 +450,7 @@ Process {
 
     # NEW: Windows dump files cleanup
     function Clear-WindowsDumpFiles {
-        param([int]$MinAgeDays = 7)
+        param([int]$MinAgeDays = 1)
 
         $cutoff = (Get-Date).AddDays(-$MinAgeDays)
         Write-LogEntry -Value "Initiating cleanup of Windows dump files (MinAgeDays=$MinAgeDays)" -Severity 1
@@ -518,7 +518,7 @@ Process {
     $UserTempMinAgeDays = 0        # Clean immediately
     $SCCMCacheMinAgeDays = 7       # Keep SCCM cache content for 7 days
     $ClearSCCMClientCache = $true  # Toggle SCCM cache cleanup
-    $DumpMinAgeDays = 7            # Keep dump files for 7 days (set 0 to remove immediately)
+    $DumpMinAgeDays = 1            # Keep dump files for 1 day (set 0 to remove immediately)
 
     # Handle initial value for exit code variable
     $ExitCode = 0
