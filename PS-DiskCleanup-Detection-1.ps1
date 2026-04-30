@@ -72,7 +72,7 @@ Begin {
     # --------------------------
     # Detection configuration
     # --------------------------
-    $MinimumFreeSpaceGB      = 64
+    $MinimumFreeSpaceGB      = 10
     $MaxExecutions           = 100
 
     # Retention days (must match remediation intent)
