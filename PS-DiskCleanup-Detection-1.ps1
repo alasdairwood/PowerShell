@@ -23,10 +23,11 @@
 
     Version history:
     1.0.0 - (2024-11-25) Script created
-    1.1.0 - (2026-04-27) Updated detection to reflect remediation additions:
+    1.1.0 - (2026-04-23) Updated detection to reflect remediation additions:
             - User Temp cleanup
             - Windows Temp cleanup
             - SCCM cache cleanup (retain 7 days)
+    1.2.0 - (2026-04-27) Updated detection to reflect remediation additions:
             - Windows dump file cleanup (retain 7 days)
 #>
 
