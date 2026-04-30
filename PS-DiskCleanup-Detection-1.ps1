@@ -37,7 +37,7 @@ Begin {
 
     # Set company name (used for execution history registry path)
     # IMPORTANT: Replace with your org name to avoid "<company_name>" literal keys in HKLM
-    $CompanyName = "NHS"
+    $CompanyName = "NHSL"
 
     # Define if any modules must be present on the device for this proactive remediation to execute properly
     $Modules = @()
