@@ -1,3 +1,27 @@
+<#
+.SYNOPSIS
+    Disables Computer Objects in Active Directory.
+
+.DESCRIPTION
+    The script will disable specified computer objects in Active Directory.
+
+.INPUTS
+    None. You cannot pipe objects to this script.
+
+.OUTPUTS
+    None.
+
+.EXAMPLE
+    PS> .\PS-Disable-Bulk-AD-Computers.ps1
+
+.NOTES
+    Version:                    1.0
+    Author:                     Alasdair Wood
+    Creation Date:              4th May 2026
+    Purpose / Change:           Initial script development
+
+#>
+
 $CsvPath = "C:\WorkArea\CSV\DisableComputers.csv"
 $LogPath = "C:\WorkArea\CSV\DisableComputers_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
 
