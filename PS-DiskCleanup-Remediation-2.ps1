@@ -6,10 +6,10 @@
     This is the remediation script for a Proactive Remediation in Endpoint Analytics used by the Disk Cleanup solution.
 
 .EXAMPLE
-    .\Remediation.ps1
+    .\PS-DiskCleanup-Remediation-2.ps1
 
 .NOTES
-    FileName:    Remediation.ps1
+    FileName:    PS-DiskCleanup-Remediation-2.ps1
     Author:      Nickolaj Andersen (original)
     Updated:     Alasdair Wood (additional detection logic and improvements)
     Contact:     @NickolajA

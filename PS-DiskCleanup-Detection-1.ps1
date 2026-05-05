@@ -13,10 +13,10 @@
       - Combined user profile Temp folders exceed a threshold (default 1GB) [optional]
 
 .EXAMPLE
-    .\Detection.ps1
+    .\PS-DiskCleanup-Detection-1.ps1
 
 .NOTES
-    FileName:    Detection.ps1
+    FileName:    PS-DiskCleanup-Detection-1.ps1
     Author:      Nickolaj Andersen (original)
     Updated:     Alasdair Wood (additional detection logic and improvements)
     Updated:     2026-04-27
@@ -28,7 +28,7 @@
             - Windows Temp cleanup
             - SCCM cache cleanup (retain 7 days)
     1.2.0 - (2026-04-27) Updated detection to reflect remediation additions:
-            - Windows dump file cleanup (retain 7 days)
+            - Windows dump file cleanup (retain 1 days)
 #>
 
 Begin {
@@ -77,7 +77,7 @@ Begin {
 
     # Retention days (must match remediation intent)
     $SCCMCacheRetentionDays  = 7
-    $DumpRetentionDays       = 7
+    $DumpRetentionDays       = 1
 
     # Optional extra triggers (set to $false if you only want the <64GB trigger)
     $EnableWindowsTempCheck  = $true
