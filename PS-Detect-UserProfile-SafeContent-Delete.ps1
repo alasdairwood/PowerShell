@@ -1,10 +1,11 @@
+
 <#
 .SYNOPSIS
-    Intune detection script for safe AppData disk cleanup.
+    Intune detection script for safe AppData + system dump cleanup.
 
 .DESCRIPTION
-    Detects user profile AppData cache/temp content that is older than the configured age threshold.
-    Exits 1 if cleanup is required.
+    Detects user profile AppData cache/temp content and system dump files that are older than the configured thresholds.
+    Exits 1 if cleanup is required (based on MinimumTotalSizeMB threshold).
     Exits 0 if no cleanup is required.
 
 .NOTES
@@ -53,28 +54,50 @@ function Get-DirectorySize {
         [datetime]$OlderThan
     )
 
-    if (-not (Test-Path -LiteralPath $Path)) {
-        return 0
-    }
+    if (-not (Test-Path -LiteralPath $Path)) { return 0 }
 
     try {
-        $Size = Get-ChildItem -LiteralPath $Path -Recurse -Force -File -ErrorAction SilentlyContinue |
-            Where-Object { $_.LastWriteTime -lt $OlderThan } |
-            Measure-Object -Property Length -Sum
+        # Avoid reparse points where possible to prevent OneDrive/junction loops
+        $items = Get-ChildItem -LiteralPath $Path -Recurse -Force -File -ErrorAction SilentlyContinue
+        $items = $items | Where-Object { $_.LastWriteTime -lt $OlderThan }
 
-        if ($null -ne $Size.Sum) {
-            return [int64]$Size.Sum
+        # Filter out reparse points if the property exists (PS 5.1+ usually has it)
+        $items = $items | Where-Object {
+            if ($_.Attributes) { ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0 } else { $true }
         }
-        else {
-            return 0
-        }
+
+        $Size = $items | Measure-Object -Property Length -Sum
+        if ($null -ne $Size.Sum) { return [int64]$Size.Sum } else { return 0 }
     }
     catch {
         return 0
     }
 }
 
-function Add-DetectionResult {
+function Get-FileSize {
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$Path,
+
+        [Parameter(Mandatory = $true)]
+        [datetime]$OlderThan
+    )
+
+    if (-not (Test-Path -LiteralPath $Path)) { return 0 }
+
+    try {
+        $Item = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+        if ($null -eq $Item -or $Item.PSIsContainer) { return 0 }
+
+        if ($Item.LastWriteTime -lt $OlderThan) { return [int64]$Item.Length }
+        return 0
+    }
+    catch {
+        return 0
+    }
+}
+
+function Add-DetectionResultDir {
     param (
         [string]$ProfileName,
         [string]$Category,
@@ -82,15 +105,34 @@ function Add-DetectionResult {
         [datetime]$OlderThan
     )
 
-    if (-not (Test-Path -LiteralPath $Path)) {
-        return
-    }
+    if (-not (Test-Path -LiteralPath $Path)) { return }
 
     $SizeBytes = Get-DirectorySize -Path $Path -OlderThan $OlderThan
-
     if ($SizeBytes -gt 0) {
         $script:TotalDetectedBytes += $SizeBytes
+        $DetectedItems.Add([PSCustomObject]@{
+            ProfileName = $ProfileName
+            Category    = $Category
+            Path        = $Path
+            SizeMB      = [math]::Round($SizeBytes / 1MB, 2)
+            OlderThan   = $OlderThan
+        }) | Out-Null
+    }
+}
 
+function Add-DetectionResultFile {
+    param (
+        [string]$ProfileName,
+        [string]$Category,
+        [string]$Path,
+        [datetime]$OlderThan
+    )
+
+    if (-not (Test-Path -LiteralPath $Path)) { return }
+
+    $SizeBytes = Get-FileSize -Path $Path -OlderThan $OlderThan
+    if ($SizeBytes -gt 0) {
+        $script:TotalDetectedBytes += $SizeBytes
         $DetectedItems.Add([PSCustomObject]@{
             ProfileName = $ProfileName
             Category    = $Category
@@ -110,20 +152,46 @@ function Get-UserProfiles {
             (Test-Path -LiteralPath $_.LocalPath)
         }
 
-    foreach ($Profile in $Profiles) {
-        $ProfileName = Split-Path -Path $Profile.LocalPath -Leaf
+    foreach ($UserProfile in $Profiles) {
+        $ProfileName = Split-Path -Path $UserProfile.LocalPath -Leaf
 
-        if ($ExcludedProfileNames -contains $ProfileName) {
-            continue
-        }
+        if ($ExcludedProfileNames -contains $ProfileName) { continue }
 
+        # FIXED: Use $UserProfile (not $Profile)
         [PSCustomObject]@{
             ProfileName = $ProfileName
-            ProfilePath = $Profile.LocalPath
-            Loaded      = $Profile.Loaded
-            SID         = $Profile.SID
+            ProfilePath = $UserProfile.LocalPath
+            Loaded      = $UserProfile.Loaded
+            SID         = $UserProfile.SID
         }
     }
+}
+
+function Add-DmpFilesInFolder {
+    param(
+        [string]$FolderPath,
+        [string]$Category,
+        [datetime]$OlderThan,
+        [switch]$Recurse
+    )
+
+    if (-not (Test-Path -LiteralPath $FolderPath)) { return }
+
+    try {
+        $params = @{
+            LiteralPath  = $FolderPath
+            Filter       = "*.dmp"
+            File         = $true
+            Force        = $true
+            ErrorAction  = "SilentlyContinue"
+        }
+        if ($Recurse) { $params["Recurse"] = $true }
+
+        Get-ChildItem @params | ForEach-Object {
+            Add-DetectionResultFile -ProfileName "System" -Category $Category -Path $_.FullName -OlderThan $OlderThan
+        }
+    }
+    catch { }
 }
 
 # -----------------------------
@@ -136,87 +204,105 @@ $CrashDumpOlderThan = $Now.AddDays(-$CrashDumpOlderThanDays)
 
 $Profiles = Get-UserProfiles
 
-foreach ($Profile in $Profiles) {
-    $ProfileName = $Profile.ProfileName
-    $ProfilePath = $Profile.ProfilePath
+foreach ($UserProfile in $Profiles) {
+    $ProfileName = $UserProfile.ProfileName
+    $ProfilePath = $UserProfile.ProfilePath
 
     # User Temp
-    Add-DetectionResult -ProfileName $ProfileName -Category "User Temp" -Path "$ProfilePath\AppData\Local\Temp" -OlderThan $TempOlderThan
+    Add-DetectionResultDir -ProfileName $ProfileName -Category "User Temp" -Path (Join-Path $ProfilePath "AppData\Local\Temp") -OlderThan $TempOlderThan
 
-    # Crash dumps
-    Add-DetectionResult -ProfileName $ProfileName -Category "Crash Dumps" -Path "$ProfilePath\AppData\Local\CrashDumps" -OlderThan $CrashDumpOlderThan
+    # Crash dumps (per-user)
+    Add-DetectionResultDir -ProfileName $ProfileName -Category "Crash Dumps" -Path (Join-Path $ProfilePath "AppData\Local\CrashDumps") -OlderThan $CrashDumpOlderThan
 
     # Microsoft Edge cache - all profiles
-    $EdgeUserData = "$ProfilePath\AppData\Local\Microsoft\Edge\User Data"
+    $EdgeUserData = Join-Path $ProfilePath "AppData\Local\Microsoft\Edge\User Data"
     if (Test-Path -LiteralPath $EdgeUserData) {
         Get-ChildItem -LiteralPath $EdgeUserData -Directory -Force -ErrorAction SilentlyContinue |
             Where-Object { $_.Name -match "^(Default|Profile \d+|Guest Profile)$" } |
             ForEach-Object {
-                Add-DetectionResult -ProfileName $ProfileName -Category "Edge Cache" -Path "$($_.FullName)\Cache" -OlderThan $CacheOlderThan
-                Add-DetectionResult -ProfileName $ProfileName -Category "Edge Code Cache" -Path "$($_.FullName)\Code Cache" -OlderThan $CacheOlderThan
-                Add-DetectionResult -ProfileName $ProfileName -Category "Edge GPU Cache" -Path "$($_.FullName)\GPUCache" -OlderThan $CacheOlderThan
-                Add-DetectionResult -ProfileName $ProfileName -Category "Edge Service Worker Cache" -Path "$($_.FullName)\Service Worker\CacheStorage" -OlderThan $CacheOlderThan
+                Add-DetectionResultDir -ProfileName $ProfileName -Category "Edge Cache" -Path (Join-Path $_.FullName "Cache") -OlderThan $CacheOlderThan
+                Add-DetectionResultDir -ProfileName $ProfileName -Category "Edge Code Cache" -Path (Join-Path $_.FullName "Code Cache") -OlderThan $CacheOlderThan
+                Add-DetectionResultDir -ProfileName $ProfileName -Category "Edge GPU Cache" -Path (Join-Path $_.FullName "GPUCache") -OlderThan $CacheOlderThan
+                Add-DetectionResultDir -ProfileName $ProfileName -Category "Edge Service Worker Cache" -Path (Join-Path $_.FullName "Service Worker\CacheStorage") -OlderThan $CacheOlderThan
             }
     }
 
     # Google Chrome cache - all profiles
-    $ChromeUserData = "$ProfilePath\AppData\Local\Google\Chrome\User Data"
+    $ChromeUserData = Join-Path $ProfilePath "AppData\Local\Google\Chrome\User Data"
     if (Test-Path -LiteralPath $ChromeUserData) {
         Get-ChildItem -LiteralPath $ChromeUserData -Directory -Force -ErrorAction SilentlyContinue |
             Where-Object { $_.Name -match "^(Default|Profile \d+|Guest Profile)$" } |
             ForEach-Object {
-                Add-DetectionResult -ProfileName $ProfileName -Category "Chrome Cache" -Path "$($_.FullName)\Cache" -OlderThan $CacheOlderThan
-                Add-DetectionResult -ProfileName $ProfileName -Category "Chrome Code Cache" -Path "$($_.FullName)\Code Cache" -OlderThan $CacheOlderThan
-                Add-DetectionResult -ProfileName $ProfileName -Category "Chrome GPU Cache" -Path "$($_.FullName)\GPUCache" -OlderThan $CacheOlderThan
-                Add-DetectionResult -ProfileName $ProfileName -Category "Chrome Service Worker Cache" -Path "$($_.FullName)\Service Worker\CacheStorage" -OlderThan $CacheOlderThan
+                Add-DetectionResultDir -ProfileName $ProfileName -Category "Chrome Cache" -Path (Join-Path $_.FullName "Cache") -OlderThan $CacheOlderThan
+                Add-DetectionResultDir -ProfileName $ProfileName -Category "Chrome Code Cache" -Path (Join-Path $_.FullName "Code Cache") -OlderThan $CacheOlderThan
+                Add-DetectionResultDir -ProfileName $ProfileName -Category "Chrome GPU Cache" -Path (Join-Path $_.FullName "GPUCache") -OlderThan $CacheOlderThan
+                Add-DetectionResultDir -ProfileName $ProfileName -Category "Chrome Service Worker Cache" -Path (Join-Path $_.FullName "Service Worker\CacheStorage") -OlderThan $CacheOlderThan
             }
     }
 
     # Teams classic cache
     $TeamsClassicPaths = @(
-        "$ProfilePath\AppData\Roaming\Microsoft\Teams\Cache",
-        "$ProfilePath\AppData\Roaming\Microsoft\Teams\Code Cache",
-        "$ProfilePath\AppData\Roaming\Microsoft\Teams\GPUCache",
-        "$ProfilePath\AppData\Roaming\Microsoft\Teams\IndexedDB",
-        "$ProfilePath\AppData\Roaming\Microsoft\Teams\Local Storage",
-        "$ProfilePath\AppData\Roaming\Microsoft\Teams\tmp",
-        "$ProfilePath\AppData\Local\Microsoft\Teams\Cache",
-        "$ProfilePath\AppData\Local\Microsoft\Teams\Code Cache",
-        "$ProfilePath\AppData\Local\Microsoft\Teams\GPUCache",
-        "$ProfilePath\AppData\Local\Microsoft\Teams\tmp"
+        (Join-Path $ProfilePath "AppData\Roaming\Microsoft\Teams\Cache"),
+        (Join-Path $ProfilePath "AppData\Roaming\Microsoft\Teams\Code Cache"),
+        (Join-Path $ProfilePath "AppData\Roaming\Microsoft\Teams\GPUCache"),
+        (Join-Path $ProfilePath "AppData\Roaming\Microsoft\Teams\IndexedDB"),
+        (Join-Path $ProfilePath "AppData\Roaming\Microsoft\Teams\Local Storage"),
+        (Join-Path $ProfilePath "AppData\Roaming\Microsoft\Teams\tmp"),
+        (Join-Path $ProfilePath "AppData\Local\Microsoft\Teams\Cache"),
+        (Join-Path $ProfilePath "AppData\Local\Microsoft\Teams\Code Cache"),
+        (Join-Path $ProfilePath "AppData\Local\Microsoft\Teams\GPUCache"),
+        (Join-Path $ProfilePath "AppData\Local\Microsoft\Teams\tmp")
     )
-
     foreach ($TeamsPath in $TeamsClassicPaths) {
-        Add-DetectionResult -ProfileName $ProfileName -Category "Teams Classic Cache" -Path $TeamsPath -OlderThan $CacheOlderThan
+        Add-DetectionResultDir -ProfileName $ProfileName -Category "Teams Classic Cache" -Path $TeamsPath -OlderThan $CacheOlderThan
     }
 
     # New Teams cache
-    $NewTeamsBase = "$ProfilePath\AppData\Local\Packages\MSTeams_8wekyb3d8bbwe"
+    $NewTeamsBase = Join-Path $ProfilePath "AppData\Local\Packages\MSTeams_8wekyb3d8bbwe"
     $NewTeamsPaths = @(
-        "$NewTeamsBase\LocalCache\Microsoft\MSTeams\Cache",
-        "$NewTeamsBase\LocalCache\Microsoft\MSTeams\Code Cache",
-        "$NewTeamsBase\LocalCache\Microsoft\MSTeams\GPUCache",
-        "$NewTeamsBase\LocalCache\Microsoft\MSTeams\Service Worker\CacheStorage",
-        "$NewTeamsBase\TempState"
+        (Join-Path $NewTeamsBase "LocalCache\Microsoft\MSTeams\Cache"),
+        (Join-Path $NewTeamsBase "LocalCache\Microsoft\MSTeams\Code Cache"),
+        (Join-Path $NewTeamsBase "LocalCache\Microsoft\MSTeams\GPUCache"),
+        (Join-Path $NewTeamsBase "LocalCache\Microsoft\MSTeams\Service Worker\CacheStorage"),
+        (Join-Path $NewTeamsBase "TempState")
     )
-
     foreach ($NewTeamsPath in $NewTeamsPaths) {
-        Add-DetectionResult -ProfileName $ProfileName -Category "New Teams Cache" -Path $NewTeamsPath -OlderThan $CacheOlderThan
+        Add-DetectionResultDir -ProfileName $ProfileName -Category "New Teams Cache" -Path $NewTeamsPath -OlderThan $CacheOlderThan
     }
 
     # Explorer thumbnail/icon cache
-    Add-DetectionResult -ProfileName $ProfileName -Category "Explorer Cache" -Path "$ProfilePath\AppData\Local\Microsoft\Windows\Explorer" -OlderThan $CacheOlderThan
+    Add-DetectionResultDir -ProfileName $ProfileName -Category "Explorer Cache" -Path (Join-Path $ProfilePath "AppData\Local\Microsoft\Windows\Explorer") -OlderThan $CacheOlderThan
 }
 
 # Windows Temp
-if ($IncludeWindowsTemp -eq $true) {
-    Add-DetectionResult -ProfileName "System" -Category "Windows Temp" -Path "C:\Windows\Temp" -OlderThan $TempOlderThan
+if ($IncludeWindowsTemp) {
+    Add-DetectionResultDir -ProfileName "System" -Category "Windows Temp" -Path "C:\Windows\Temp" -OlderThan $TempOlderThan
 }
+
+# -----------------------------
+# System Dump Files (Windows + LiveKernelReports)
+# -----------------------------
+
+# Full memory dump
+Add-DetectionResultFile -ProfileName "System" -Category "Windows MEMORY.DMP" -Path "C:\Windows\MEMORY.DMP" -OlderThan $CrashDumpOlderThan
+
+# Minidumps folder
+Add-DetectionResultDir -ProfileName "System" -Category "Windows Minidumps" -Path "C:\Windows\Minidump" -OlderThan $CrashDumpOlderThan
+
+# Any *.dmp directly under C:\Windows
+Add-DmpFilesInFolder -FolderPath "C:\Windows" -Category "Windows DMP (root)" -OlderThan $CrashDumpOlderThan
+
+# LiveKernelReports dumps (recursive)
+$LiveKernelBase = "C:\Windows\LiveKernelReports"
+Add-DmpFilesInFolder -FolderPath $LiveKernelBase -Category "LiveKernelReports DMP" -OlderThan $CrashDumpOlderThan -Recurse
+
+# -----------------------------
+# Output + Exit Codes
+# -----------------------------
 
 $TotalDetectedMB = [math]::Round($TotalDetectedBytes / 1MB, 2)
 
-Write-Output "Detected reclaimable AppData/system cache size: $TotalDetectedMB MB"
-
+Write-Output "Detected reclaimable cache/dump size: $TotalDetectedMB MB"
 $DetectedItems |
     Sort-Object SizeMB -Descending |
     Select-Object -First 25 |
@@ -225,7 +311,7 @@ $DetectedItems |
     }
 
 if ($TotalDetectedMB -ge $MinimumTotalSizeMB) {
-    Write-Output "Cleanup required. Detected size is greater than or equal to threshold of $MinimumTotalSizeMB MB."
+    Write-Output "Cleanup required. Detected size is >= threshold of $MinimumTotalSizeMB MB."
     exit 1
 }
 else {

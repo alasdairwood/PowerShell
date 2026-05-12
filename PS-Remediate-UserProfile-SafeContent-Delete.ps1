@@ -1,10 +1,11 @@
+
 <#
 .SYNOPSIS
-    Intune remediation script for safe AppData disk cleanup.
+    Intune remediation script for safe AppData + system dump cleanup.
 
 .DESCRIPTION
-    Removes safe cache/temp content from user profile AppData locations.
-    Does not delete Outlook OST files, OneDrive cache, full AppData folders, full browser profiles, or full Teams folders.
+    Removes user profile AppData cache/temp content and system dump files that are older than the configured thresholds.
+    Designed to match the detection script logic as closely as possible.
 
 .NOTES
     Designed for Microsoft Intune Remediations.
@@ -13,7 +14,7 @@
 #>
 
 # -----------------------------
-# Configuration
+# Configuration (match Detection)
 # -----------------------------
 
 $TempOlderThanDays        = 1
@@ -21,8 +22,8 @@ $CacheOlderThanDays       = 7
 $CrashDumpOlderThanDays   = 7
 $IncludeWindowsTemp       = $true
 
-$LogRoot = "C:\ProgramData\IntuneRemediations\AppDataCleanup"
-$LogFile = Join-Path $LogRoot "AppDataCleanup.log"
+# Optional: attempt to remove empty folders after deleting old files
+$RemoveEmptyDirectories   = $true
 
 $ExcludedProfileNames = @(
     "Public",
@@ -33,42 +34,20 @@ $ExcludedProfileNames = @(
     "defaultuser0"
 )
 
-# Set to $true for testing only.
-$WhatIfMode = $false
-
 # -----------------------------
-# Preparation
+# Variables
 # -----------------------------
 
-if (-not (Test-Path -LiteralPath $LogRoot)) {
-    New-Item -Path $LogRoot -ItemType Directory -Force | Out-Null
-}
+$Now = Get-Date
+$TotalFreedBytes = 0
+$TotalRemovedFiles = 0
+$TotalFailedRemovals = 0
+
+$Actions = New-Object System.Collections.Generic.List[object]
 
 # -----------------------------
 # Functions
 # -----------------------------
-
-function Write-Log {
-    param (
-        [Parameter(Mandatory = $true)]
-        [string]$Message,
-
-        [ValidateSet("INFO", "WARN", "ERROR")]
-        [string]$Level = "INFO"
-    )
-
-    $Timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-    $Entry = "$Timestamp [$Level] $Message"
-
-    Write-Output $Entry
-
-    try {
-        Add-Content -Path $LogFile -Value $Entry -Encoding UTF8
-    }
-    catch {
-        Write-Output "Unable to write to log file: $LogFile"
-    }
-}
 
 function Get-UserProfiles {
     $Profiles = Get-CimInstance Win32_UserProfile -ErrorAction SilentlyContinue |
@@ -79,328 +58,262 @@ function Get-UserProfiles {
             (Test-Path -LiteralPath $_.LocalPath)
         }
 
-    foreach ($Profile in $Profiles) {
-        $ProfileName = Split-Path -Path $Profile.LocalPath -Leaf
+    foreach ($UserProfile in $Profiles) {
+        $ProfileName = Split-Path -Path $UserProfile.LocalPath -Leaf
 
-        if ($ExcludedProfileNames -contains $ProfileName) {
-            continue
-        }
+        if ($ExcludedProfileNames -contains $ProfileName) { continue }
 
         [PSCustomObject]@{
             ProfileName = $ProfileName
-            ProfilePath = $Profile.LocalPath
-            Loaded      = $Profile.Loaded
-            SID         = $Profile.SID
+            ProfilePath = $UserProfile.LocalPath
+            Loaded      = $UserProfile.Loaded
+            SID         = $UserProfile.SID
         }
     }
 }
 
-function Remove-OldFilesFromPath {
-    param (
-        [Parameter(Mandatory = $true)]
+function Remove-OldFilesInDirectory {
+    param(
+        [Parameter(Mandatory)]
         [string]$Path,
 
-        [Parameter(Mandatory = $true)]
+        [Parameter(Mandatory)]
         [datetime]$OlderThan,
 
-        [Parameter(Mandatory = $true)]
-        [string]$Category,
+        [string]$Category = "Cleanup",
 
-        [Parameter(Mandatory = $true)]
-        [string]$ProfileName
+        [switch]$Recurse,
+
+        [string]$Filter = "*"
     )
 
-    if (-not (Test-Path -LiteralPath $Path)) {
-        return
-    }
-
-    Write-Log "Processing [$Category] for [$ProfileName]: $Path. Removing files older than $OlderThan"
-
-    $DeletedFiles = 0
-    $DeletedBytes = 0
-    $FailedFiles = 0
+    if (-not (Test-Path -LiteralPath $Path)) { return }
 
     try {
-        $Files = Get-ChildItem -LiteralPath $Path -Recurse -Force -File -ErrorAction SilentlyContinue |
-            Where-Object { $_.LastWriteTime -lt $OlderThan }
+        $gciParams = @{
+            LiteralPath = $Path
+            Force       = $true
+            ErrorAction = "SilentlyContinue"
+            File        = $true
+            Filter      = $Filter
+        }
+        if ($Recurse) { $gciParams["Recurse"] = $true }
 
-        foreach ($File in $Files) {
+        $files = Get-ChildItem @gciParams | Where-Object { $_.LastWriteTime -lt $OlderThan }
+
+        # Avoid reparse points if possible
+        $files = $files | Where-Object {
+            if ($_.Attributes) { ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0 } else { $true }
+        }
+
+        foreach ($f in $files) {
             try {
-                $FileSize = $File.Length
+                $len = [int64]$f.Length
+                Remove-Item -LiteralPath $f.FullName -Force -ErrorAction Stop
 
-                if ($WhatIfMode -eq $true) {
-                    Write-Log "WHATIF: Would delete file: $($File.FullName)"
-                }
-                else {
-                    Remove-Item -LiteralPath $File.FullName -Force -ErrorAction Stop
-                }
+                $script:TotalFreedBytes += $len
+                $script:TotalRemovedFiles++
 
-                $DeletedFiles++
-                $DeletedBytes += $FileSize
+                $Actions.Add([PSCustomObject]@{
+                    Category = $Category
+                    Path     = $f.FullName
+                    FreedMB  = [math]::Round($len / 1MB, 2)
+                }) | Out-Null
             }
             catch {
-                $FailedFiles++
-                Write-Log "Failed to delete file: $($File.FullName). Error: $($_.Exception.Message)" "WARN"
+                $script:TotalFailedRemovals++
             }
         }
 
-        # Remove empty directories after file cleanup.
-        $Directories = Get-ChildItem -LiteralPath $Path -Recurse -Force -Directory -ErrorAction SilentlyContinue |
-            Sort-Object FullName -Descending
-
-        foreach ($Directory in $Directories) {
+        if ($RemoveEmptyDirectories) {
             try {
-                $HasChildren = Get-ChildItem -LiteralPath $Directory.FullName -Force -ErrorAction SilentlyContinue | Select-Object -First 1
-
-                if ($null -eq $HasChildren) {
-                    if ($WhatIfMode -eq $true) {
-                        Write-Log "WHATIF: Would remove empty directory: $($Directory.FullName)"
-                    }
-                    else {
-                        Remove-Item -LiteralPath $Directory.FullName -Force -ErrorAction Stop
-                    }
+                $dirParams = @{
+                    LiteralPath = $Path
+                    Force       = $true
+                    ErrorAction = "SilentlyContinue"
+                    Directory   = $true
                 }
-            }
-            catch {
-                Write-Log "Failed to remove empty directory: $($Directory.FullName). Error: $($_.Exception.Message)" "WARN"
-            }
-        }
+                if ($Recurse) { $dirParams["Recurse"] = $true }
 
-        $DeletedMB = [math]::Round($DeletedBytes / 1MB, 2)
-        Write-Log "Completed [$Category] for [$ProfileName]. Deleted files: $DeletedFiles. Failed files: $FailedFiles. Reclaimed: $DeletedMB MB"
+                # Remove empty directories bottom-up
+                Get-ChildItem @dirParams |
+                    Sort-Object FullName -Descending |
+                    ForEach-Object {
+                        try {
+                            $hasChildren = Get-ChildItem -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue | Select-Object -First 1
+                            if (-not $hasChildren) {
+                                Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue
+                            }
+                        } catch { }
+                    }
+            } catch { }
+        }
     }
     catch {
-        Write-Log "Failed processing path: $Path. Error: $($_.Exception.Message)" "ERROR"
+        # swallow and continue
     }
 }
 
-function Remove-MatchingFilesFromPath {
-    param (
-        [Parameter(Mandatory = $true)]
+function Remove-OldFile {
+    param(
+        [Parameter(Mandatory)]
         [string]$Path,
 
-        [Parameter(Mandatory = $true)]
+        [Parameter(Mandatory)]
         [datetime]$OlderThan,
 
-        [Parameter(Mandatory = $true)]
-        [string[]]$FileNamePatterns,
-
-        [Parameter(Mandatory = $true)]
-        [string]$Category,
-
-        [Parameter(Mandatory = $true)]
-        [string]$ProfileName
+        [string]$Category = "Cleanup"
     )
 
-    if (-not (Test-Path -LiteralPath $Path)) {
-        return
-    }
+    if (-not (Test-Path -LiteralPath $Path)) { return }
 
-    Write-Log "Processing matching file cleanup [$Category] for [$ProfileName]: $Path"
+    try {
+        $item = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+        if ($null -eq $item -or $item.PSIsContainer) { return }
 
-    foreach ($Pattern in $FileNamePatterns) {
-        try {
-            $Files = Get-ChildItem -LiteralPath $Path -Force -File -Filter $Pattern -ErrorAction SilentlyContinue |
-                Where-Object { $_.LastWriteTime -lt $OlderThan }
+        if ($item.LastWriteTime -lt $OlderThan) {
+            try {
+                $len = [int64]$item.Length
+                Remove-Item -LiteralPath $item.FullName -Force -ErrorAction Stop
 
-            foreach ($File in $Files) {
-                try {
-                    if ($WhatIfMode -eq $true) {
-                        Write-Log "WHATIF: Would delete file: $($File.FullName)"
-                    }
-                    else {
-                        Remove-Item -LiteralPath $File.FullName -Force -ErrorAction Stop
-                    }
+                $script:TotalFreedBytes += $len
+                $script:TotalRemovedFiles++
 
-                    Write-Log "Deleted file: $($File.FullName)"
-                }
-                catch {
-                    Write-Log "Failed to delete file: $($File.FullName). Error: $($_.Exception.Message)" "WARN"
-                }
+                $Actions.Add([PSCustomObject]@{
+                    Category = $Category
+                    Path     = $item.FullName
+                    FreedMB  = [math]::Round($len / 1MB, 2)
+                }) | Out-Null
+            }
+            catch {
+                $script:TotalFailedRemovals++
             }
         }
-        catch {
-            Write-Log "Failed matching cleanup for pattern $Pattern in $Path. Error: $($_.Exception.Message)" "WARN"
-        }
+    }
+    catch {
+        # swallow and continue
     }
 }
 
 # -----------------------------
-# Main
+# Remediation
 # -----------------------------
 
-Write-Log "Starting AppData cleanup remediation."
-Write-Log "WhatIf mode: $WhatIfMode"
-
-$Now = Get-Date
 $TempOlderThan      = $Now.AddDays(-$TempOlderThanDays)
 $CacheOlderThan     = $Now.AddDays(-$CacheOlderThanDays)
 $CrashDumpOlderThan = $Now.AddDays(-$CrashDumpOlderThanDays)
 
 $Profiles = Get-UserProfiles
 
-foreach ($Profile in $Profiles) {
-    $ProfileName = $Profile.ProfileName
-    $ProfilePath = $Profile.ProfilePath
+foreach ($UserProfile in $Profiles) {
+    $ProfileName = $UserProfile.ProfileName
+    $ProfilePath = $UserProfile.ProfilePath
 
-    Write-Log "Processing profile: $ProfileName | Loaded: $($Profile.Loaded) | Path: $ProfilePath"
-
-    # ------------------------------------------------------------
     # User Temp
-    # ------------------------------------------------------------
+    Remove-OldFilesInDirectory -Path (Join-Path $ProfilePath "AppData\Local\Temp") -OlderThan $TempOlderThan -Category "$ProfileName | User Temp" -Recurse
 
-    Remove-OldFilesFromPath `
-        -Path "$ProfilePath\AppData\Local\Temp" `
-        -OlderThan $TempOlderThan `
-        -Category "User Temp" `
-        -ProfileName $ProfileName
+    # Per-user crash dumps
+    Remove-OldFilesInDirectory -Path (Join-Path $ProfilePath "AppData\Local\CrashDumps") -OlderThan $CrashDumpOlderThan -Category "$ProfileName | Crash Dumps" -Recurse
 
-    # ------------------------------------------------------------
-    # Crash dumps
-    # ------------------------------------------------------------
-
-    Remove-OldFilesFromPath `
-        -Path "$ProfilePath\AppData\Local\CrashDumps" `
-        -OlderThan $CrashDumpOlderThan `
-        -Category "Crash Dumps" `
-        -ProfileName $ProfileName
-
-    # ------------------------------------------------------------
-    # Microsoft Edge cache - all Edge profiles
-    # ------------------------------------------------------------
-
-    $EdgeUserData = "$ProfilePath\AppData\Local\Microsoft\Edge\User Data"
-
+    # Edge cache (all profiles)
+    $EdgeUserData = Join-Path $ProfilePath "AppData\Local\Microsoft\Edge\User Data"
     if (Test-Path -LiteralPath $EdgeUserData) {
         Get-ChildItem -LiteralPath $EdgeUserData -Directory -Force -ErrorAction SilentlyContinue |
             Where-Object { $_.Name -match "^(Default|Profile \d+|Guest Profile)$" } |
             ForEach-Object {
-                $EdgeProfilePath = $_.FullName
-
-                $EdgeCachePaths = @(
-                    "$EdgeProfilePath\Cache",
-                    "$EdgeProfilePath\Code Cache",
-                    "$EdgeProfilePath\GPUCache",
-                    "$EdgeProfilePath\Service Worker\CacheStorage",
-                    "$EdgeProfilePath\Media Cache"
-                )
-
-                foreach ($CachePath in $EdgeCachePaths) {
-                    Remove-OldFilesFromPath `
-                        -Path $CachePath `
-                        -OlderThan $CacheOlderThan `
-                        -Category "Edge Cache" `
-                        -ProfileName $ProfileName
-                }
+                Remove-OldFilesInDirectory -Path (Join-Path $_.FullName "Cache") -OlderThan $CacheOlderThan -Category "$ProfileName | Edge Cache" -Recurse
+                Remove-OldFilesInDirectory -Path (Join-Path $_.FullName "Code Cache") -OlderThan $CacheOlderThan -Category "$ProfileName | Edge Code Cache" -Recurse
+                Remove-OldFilesInDirectory -Path (Join-Path $_.FullName "GPUCache") -OlderThan $CacheOlderThan -Category "$ProfileName | Edge GPU Cache" -Recurse
+                Remove-OldFilesInDirectory -Path (Join-Path $_.FullName "Service Worker\CacheStorage") -OlderThan $CacheOlderThan -Category "$ProfileName | Edge SW CacheStorage" -Recurse
             }
     }
 
-    # ------------------------------------------------------------
-    # Google Chrome cache - all Chrome profiles
-    # ------------------------------------------------------------
-
-    $ChromeUserData = "$ProfilePath\AppData\Local\Google\Chrome\User Data"
-
+    # Chrome cache (all profiles)
+    $ChromeUserData = Join-Path $ProfilePath "AppData\Local\Google\Chrome\User Data"
     if (Test-Path -LiteralPath $ChromeUserData) {
         Get-ChildItem -LiteralPath $ChromeUserData -Directory -Force -ErrorAction SilentlyContinue |
             Where-Object { $_.Name -match "^(Default|Profile \d+|Guest Profile)$" } |
             ForEach-Object {
-                $ChromeProfilePath = $_.FullName
-
-                $ChromeCachePaths = @(
-                    "$ChromeProfilePath\Cache",
-                    "$ChromeProfilePath\Code Cache",
-                    "$ChromeProfilePath\GPUCache",
-                    "$ChromeProfilePath\Service Worker\CacheStorage",
-                    "$ChromeProfilePath\Media Cache"
-                )
-
-                foreach ($CachePath in $ChromeCachePaths) {
-                    Remove-OldFilesFromPath `
-                        -Path $CachePath `
-                        -OlderThan $CacheOlderThan `
-                        -Category "Chrome Cache" `
-                        -ProfileName $ProfileName
-                }
+                Remove-OldFilesInDirectory -Path (Join-Path $_.FullName "Cache") -OlderThan $CacheOlderThan -Category "$ProfileName | Chrome Cache" -Recurse
+                Remove-OldFilesInDirectory -Path (Join-Path $_.FullName "Code Cache") -OlderThan $CacheOlderThan -Category "$ProfileName | Chrome Code Cache" -Recurse
+                Remove-OldFilesInDirectory -Path (Join-Path $_.FullName "GPUCache") -OlderThan $CacheOlderThan -Category "$ProfileName | Chrome GPU Cache" -Recurse
+                Remove-OldFilesInDirectory -Path (Join-Path $_.FullName "Service Worker\CacheStorage") -OlderThan $CacheOlderThan -Category "$ProfileName | Chrome SW CacheStorage" -Recurse
             }
     }
 
-    # ------------------------------------------------------------
-    # Teams classic cache
-    # ------------------------------------------------------------
-
+    # Teams classic cache paths
     $TeamsClassicPaths = @(
-        "$ProfilePath\AppData\Roaming\Microsoft\Teams\Cache",
-        "$ProfilePath\AppData\Roaming\Microsoft\Teams\Code Cache",
-        "$ProfilePath\AppData\Roaming\Microsoft\Teams\GPUCache",
-        "$ProfilePath\AppData\Roaming\Microsoft\Teams\IndexedDB",
-        "$ProfilePath\AppData\Roaming\Microsoft\Teams\Local Storage",
-        "$ProfilePath\AppData\Roaming\Microsoft\Teams\tmp",
-        "$ProfilePath\AppData\Local\Microsoft\Teams\Cache",
-        "$ProfilePath\AppData\Local\Microsoft\Teams\Code Cache",
-        "$ProfilePath\AppData\Local\Microsoft\Teams\GPUCache",
-        "$ProfilePath\AppData\Local\Microsoft\Teams\tmp"
+        (Join-Path $ProfilePath "AppData\Roaming\Microsoft\Teams\Cache"),
+        (Join-Path $ProfilePath "AppData\Roaming\Microsoft\Teams\Code Cache"),
+        (Join-Path $ProfilePath "AppData\Roaming\Microsoft\Teams\GPUCache"),
+        (Join-Path $ProfilePath "AppData\Roaming\Microsoft\Teams\IndexedDB"),
+        (Join-Path $ProfilePath "AppData\Roaming\Microsoft\Teams\Local Storage"),
+        (Join-Path $ProfilePath "AppData\Roaming\Microsoft\Teams\tmp"),
+        (Join-Path $ProfilePath "AppData\Local\Microsoft\Teams\Cache"),
+        (Join-Path $ProfilePath "AppData\Local\Microsoft\Teams\Code Cache"),
+        (Join-Path $ProfilePath "AppData\Local\Microsoft\Teams\GPUCache"),
+        (Join-Path $ProfilePath "AppData\Local\Microsoft\Teams\tmp")
     )
-
-    foreach ($TeamsPath in $TeamsClassicPaths) {
-        Remove-OldFilesFromPath `
-            -Path $TeamsPath `
-            -OlderThan $CacheOlderThan `
-            -Category "Teams Classic Cache" `
-            -ProfileName $ProfileName
+    foreach ($p in $TeamsClassicPaths) {
+        Remove-OldFilesInDirectory -Path $p -OlderThan $CacheOlderThan -Category "$ProfileName | Teams Classic" -Recurse
     }
 
-    # ------------------------------------------------------------
-    # New Teams cache
-    # ------------------------------------------------------------
-
-    $NewTeamsBase = "$ProfilePath\AppData\Local\Packages\MSTeams_8wekyb3d8bbwe"
-
+    # New Teams cache (Store app)
+    $NewTeamsBase = Join-Path $ProfilePath "AppData\Local\Packages\MSTeams_8wekyb3d8bbwe"
     $NewTeamsPaths = @(
-        "$NewTeamsBase\LocalCache\Microsoft\MSTeams\Cache",
-        "$NewTeamsBase\LocalCache\Microsoft\MSTeams\Code Cache",
-        "$NewTeamsBase\LocalCache\Microsoft\MSTeams\GPUCache",
-        "$NewTeamsBase\LocalCache\Microsoft\MSTeams\Service Worker\CacheStorage",
-        "$NewTeamsBase\TempState"
+        (Join-Path $NewTeamsBase "LocalCache\Microsoft\MSTeams\Cache"),
+        (Join-Path $NewTeamsBase "LocalCache\Microsoft\MSTeams\Code Cache"),
+        (Join-Path $NewTeamsBase "LocalCache\Microsoft\MSTeams\GPUCache"),
+        (Join-Path $NewTeamsBase "LocalCache\Microsoft\MSTeams\Service Worker\CacheStorage"),
+        (Join-Path $NewTeamsBase "TempState")
     )
-
-    foreach ($NewTeamsPath in $NewTeamsPaths) {
-        Remove-OldFilesFromPath `
-            -Path $NewTeamsPath `
-            -OlderThan $CacheOlderThan `
-            -Category "New Teams Cache" `
-            -ProfileName $ProfileName
+    foreach ($p in $NewTeamsPaths) {
+        Remove-OldFilesInDirectory -Path $p -OlderThan $CacheOlderThan -Category "$ProfileName | New Teams" -Recurse
     }
 
-    # ------------------------------------------------------------
-    # Explorer thumbnail/icon cache
-    # ------------------------------------------------------------
-
-    $ExplorerCachePath = "$ProfilePath\AppData\Local\Microsoft\Windows\Explorer"
-
-    Remove-MatchingFilesFromPath `
-        -Path $ExplorerCachePath `
-        -OlderThan $CacheOlderThan `
-        -FileNamePatterns @(
-            "thumbcache_*.db",
-            "iconcache_*.db"
-        ) `
-        -Category "Explorer Thumbnail/Icon Cache" `
-        -ProfileName $ProfileName
+    # Explorer cache
+    Remove-OldFilesInDirectory -Path (Join-Path $ProfilePath "AppData\Local\Microsoft\Windows\Explorer") -OlderThan $CacheOlderThan -Category "$ProfileName | Explorer Cache" -Recurse
 }
 
-# ------------------------------------------------------------
 # Windows Temp
-# ------------------------------------------------------------
-
-if ($IncludeWindowsTemp -eq $true) {
-    Remove-OldFilesFromPath `
-        -Path "C:\Windows\Temp" `
-        -OlderThan $TempOlderThan `
-        -Category "Windows Temp" `
-        -ProfileName "System"
+if ($IncludeWindowsTemp) {
+    Remove-OldFilesInDirectory -Path "C:\Windows\Temp" -OlderThan $TempOlderThan -Category "System | Windows Temp" -Recurse
 }
 
-Write-Log "AppData cleanup remediation completed."
+# -----------------------------
+# System Dump Files (Windows + LiveKernelReports)
+# -----------------------------
+
+# C:\Windows\MEMORY.DMP
+Remove-OldFile -Path "C:\Windows\MEMORY.DMP" -OlderThan $CrashDumpOlderThan -Category "System | MEMORY.DMP"
+
+# C:\Windows\Minidump\*.dmp
+Remove-OldFilesInDirectory -Path "C:\Windows\Minidump" -OlderThan $CrashDumpOlderThan -Category "System | Minidumps" -Recurse -Filter "*.dmp"
+
+# Any *.dmp directly under C:\Windows
+Remove-OldFilesInDirectory -Path "C:\Windows" -OlderThan $CrashDumpOlderThan -Category "System | Windows DMP (root)" -Filter "*.dmp"
+
+# LiveKernelReports recursive *.dmp
+$LiveKernelBase = "C:\Windows\LiveKernelReports"
+Remove-OldFilesInDirectory -Path $LiveKernelBase -OlderThan $CrashDumpOlderThan -Category "System | LiveKernelReports DMP" -Recurse -Filter "*.dmp"
+
+# -----------------------------
+# Output + Exit Code
+# -----------------------------
+
+$FreedMB = [math]::Round($TotalFreedBytes / 1MB, 2)
+
+Write-Output "Remediation complete."
+Write-Output "Total freed: $FreedMB MB"
+Write-Output "Files removed: $TotalRemovedFiles"
+Write-Output "Failed removals (likely locked/in use): $TotalFailedRemovals"
+
+# Show top 25 largest removals (if any)
+$Actions |
+    Sort-Object FreedMB -Descending |
+    Select-Object -First 25 |
+    ForEach-Object {
+        Write-Output "$($_.Category) | $($_.FreedMB) MB | $($_.Path)"
+    }
 
 exit 0
