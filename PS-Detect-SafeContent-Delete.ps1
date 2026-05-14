@@ -1,10 +1,10 @@
-
 <#
 .SYNOPSIS
     Intune detection script for safe AppData + system dump cleanup.
 
 .DESCRIPTION
     Detects user profile AppData cache/temp content and system dump files that are older than the configured thresholds.
+    Also detects SCCM client cache (ccmcache) content older than the configured threshold.
     Exits 1 if cleanup is required (based on MinimumTotalSizeMB threshold).
     Exits 0 if no cleanup is required.
 
@@ -21,6 +21,12 @@
 $TempOlderThanDays        = 1
 $CacheOlderThanDays       = 7
 $CrashDumpOlderThanDays   = 7
+
+# NEW: SCCM cache detection
+$DetectSccmCache          = $true
+$SccmCacheOlderThanDays   = 7
+$SccmCachePath            = "C:\Windows\ccmcache"
+
 $IncludeWindowsTemp       = $true
 $MinimumTotalSizeMB       = 250
 
@@ -57,11 +63,11 @@ function Get-DirectorySize {
     if (-not (Test-Path -LiteralPath $Path)) { return 0 }
 
     try {
-        # Avoid reparse points where possible to prevent OneDrive/junction loops
-        $items = Get-ChildItem -LiteralPath $Path -Recurse -Force -File -ErrorAction SilentlyContinue
-        $items = $items | Where-Object { $_.LastWriteTime -lt $OlderThan }
+        # Enumerate files older than threshold
+        $items = Get-ChildItem -LiteralPath $Path -Recurse -Force -File -ErrorAction SilentlyContinue |
+                 Where-Object { $_.LastWriteTime -lt $OlderThan }
 
-        # Filter out reparse points if the property exists (PS 5.1+ usually has it)
+        # Filter out reparse-point files (rare, but safe)
         $items = $items | Where-Object {
             if ($_.Attributes) { ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0 } else { $true }
         }
@@ -154,10 +160,8 @@ function Get-UserProfiles {
 
     foreach ($UserProfile in $Profiles) {
         $ProfileName = Split-Path -Path $UserProfile.LocalPath -Leaf
-
         if ($ExcludedProfileNames -contains $ProfileName) { continue }
 
-        # FIXED: Use $UserProfile (not $Profile)
         [PSCustomObject]@{
             ProfileName = $ProfileName
             ProfilePath = $UserProfile.LocalPath
@@ -198,9 +202,12 @@ function Add-DmpFilesInFolder {
 # Detection
 # -----------------------------
 
-$TempOlderThan      = $Now.AddDays(-$TempOlderThanDays)
-$CacheOlderThan     = $Now.AddDays(-$CacheOlderThanDays)
-$CrashDumpOlderThan = $Now.AddDays(-$CrashDumpOlderThanDays)
+$TempOlderThan       = $Now.AddDays(-$TempOlderThanDays)
+$CacheOlderThan      = $Now.AddDays(-$CacheOlderThanDays)
+$CrashDumpOlderThan  = $Now.AddDays(-$CrashDumpOlderThanDays)
+
+# NEW: SCCM cache threshold
+$SccmCacheOlderThan  = $Now.AddDays(-$SccmCacheOlderThanDays)
 
 $Profiles = Get-UserProfiles
 
@@ -277,6 +284,13 @@ foreach ($UserProfile in $Profiles) {
 # Windows Temp
 if ($IncludeWindowsTemp) {
     Add-DetectionResultDir -ProfileName "System" -Category "Windows Temp" -Path "C:\Windows\Temp" -OlderThan $TempOlderThan
+}
+
+# -----------------------------
+# NEW: SCCM Cache (ccmcache)
+# -----------------------------
+if ($DetectSccmCache) {
+    Add-DetectionResultDir -ProfileName "System" -Category "SCCM CCMCache" -Path $SccmCachePath -OlderThan $SccmCacheOlderThan
 }
 
 # -----------------------------
