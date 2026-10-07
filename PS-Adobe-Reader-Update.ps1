@@ -1,8 +1,8 @@
-# ============================================================
+# ===================================================================
 # Adobe Acrobat Reader
-# Remove legacy Reader DC 2017 and install current Reader
+# Remove legacy Reader DC 2017 and install current Acrobat Reader
 # Designed for Intune SYSTEM context
-# ============================================================
+# ===================================================================
 
 $ErrorActionPreference = "Stop"
 
