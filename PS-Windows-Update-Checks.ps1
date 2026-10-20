@@ -1,4 +1,10 @@
-Write-Host "`n=== WINDOWS UPDATE STATUS ===" -ForegroundColor Cyan
+$ComputerName = "D11894"
+
+Write-Host "`nConnecting to $ComputerName..." -ForegroundColor Cyan
+
+Invoke-Command -ComputerName $ComputerName -ScriptBlock {
+
+    Write-Host "`n=== WINDOWS UPDATE STATUS ===" -ForegroundColor Cyan
 
 # ------------------------------------------------------------
 # Windows Update service
@@ -153,3 +159,5 @@ else {
 }
 
 Write-Host "`n=== CHECK COMPLETE ===" -ForegroundColor Cyan
+
+}
