@@ -1,4 +1,4 @@
-$ComputerName = "D10152"
+$ComputerName = "D10865"
 
 Invoke-Command -ComputerName $ComputerName -ScriptBlock {
     $Session  = New-Object -ComObject Microsoft.Update.Session
