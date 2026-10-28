@@ -33,7 +33,7 @@ $MinimumAgeDays = 90
 
 # Change to $true if you want to test without actually removing
 # Installer files.
-$WhatIfMode = $false
+$WhatIfMode = $true
 
 
 # ============================================================
@@ -157,7 +157,7 @@ catch {
 
 
 # ============================================================
-# 3. Build Windows Installer reference list
+# Build Windows Installer Reference List
 # ============================================================
 
 Write-Log "Scanning Windows Installer database."
@@ -166,126 +166,197 @@ $SafeFiles = [System.Collections.Generic.HashSet[string]]::new(
     [System.StringComparer]::OrdinalIgnoreCase
 )
 
+$InstallerEnumerationComplete = $true
+$ProductCount = 0
+$PatchCount = 0
+$ProductErrorCount = 0
+$PatchErrorCount = 0
+
 try {
 
     $Installer = New-Object -ComObject WindowsInstaller.Installer
+
+    Write-Log "Windows Installer COM interface successfully opened."
 }
 catch {
 
     Write-Log "Unable to create Windows Installer COM object: $($_.Exception.Message)" "Error"
-    Write-Log "Installer cleanup ABORTED."
 
+    $InstallerEnumerationComplete = $false
     $Installer = $null
 }
 
 
 # ============================================================
-# Registered MSI products
+# Enumerate Products and Associated Patches
 # ============================================================
-
-$ProductCount = 0
-$ProductErrorCount = 0
 
 if ($null -ne $Installer) {
 
-    Write-Log "Enumerating registered MSI products."
-
     try {
 
-        foreach ($ProductCode in $Installer.Products) {
+        # MSIINSTALLCONTEXT_ALL = 7
+        # S-1-1-0 = Everyone SID
+
+        $AllProducts = $Installer.ProductsEx(
+            "",
+            "s-1-1-0",
+            7
+        )
+
+        foreach ($ProductObject in $AllProducts) {
+
+            $ProductCode = $null
+            $ProductName = "Unknown Product"
 
             try {
 
-                $LocalPackage = $Installer.ProductInfo(
-                    $ProductCode,
+                $ProductCode = $ProductObject.ProductCode()
+
+                $ProductName = $ProductObject.InstallProperty(
+                    "ProductName"
+                )
+
+                $LocalPackage = $ProductObject.InstallProperty(
                     "LocalPackage"
                 )
 
-                if ($LocalPackage) {
+                if (-not [string]::IsNullOrWhiteSpace($LocalPackage)) {
 
-                    $NormalisedPath = [System.IO.Path]::GetFullPath(
-                        $LocalPackage
-                    )
+                    try {
 
-                    [void]$SafeFiles.Add($NormalisedPath)
-                    $ProductCount++
+                        $NormalisedPath = [System.IO.Path]::GetFullPath(
+                            $LocalPackage.Trim()
+                        )
+
+                        [void]$SafeFiles.Add($NormalisedPath)
+
+                        $ProductCount++
+                    }
+                    catch {
+
+                        $ProductErrorCount++
+
+                        Write-Log `
+                            "Unable to normalise MSI path for $ProductName ($ProductCode): $LocalPackage" `
+                            "Warning"
+                    }
                 }
             }
             catch {
 
                 $ProductErrorCount++
+
+                Write-Log `
+                    "Unable to query product registration $ProductCode : $($_.Exception.Message)" `
+                    "Warning"
+
+                continue
             }
-        }
-
-        Write-Log "Registered MSI LocalPackage entries found: $ProductCount"
-
-        if ($ProductErrorCount -gt 0) {
-            Write-Log "MSI products that could not be queried: $ProductErrorCount" "Warning"
-        }
-    }
-    catch {
-
-        Write-Log "MSI product enumeration failed: $($_.Exception.Message)" "Error"
-        $Installer = $null
-    }
-}
 
 
-# ============================================================
-# Registered MSP patches
-# ============================================================
-
-$PatchCount = 0
-$PatchErrorCount = 0
-
-if ($null -ne $Installer) {
-
-    Write-Log "Enumerating registered Windows Installer patches."
-
-    try {
-
-        foreach ($PatchCode in $Installer.Patches("")) {
+            # ====================================================
+            # Enumerate patches belonging to THIS product
+            # ====================================================
 
             try {
 
-                $LocalPackage = $Installer.PatchInfo(
-                    $PatchCode,
-                    "LocalPackage"
+                $ProductPatches = @(
+                    $Installer.Patches($ProductCode)
                 )
 
-                if ($LocalPackage) {
+                foreach ($PatchCode in $ProductPatches) {
 
-                    $NormalisedPath = [System.IO.Path]::GetFullPath(
-                        $LocalPackage
-                    )
+                    try {
 
-                    [void]$SafeFiles.Add($NormalisedPath)
-                    $PatchCount++
+                        $PatchLocalPackage = $Installer.PatchInfo(
+                            $PatchCode,
+                            "LocalPackage"
+                        )
+
+                        if (-not [string]::IsNullOrWhiteSpace($PatchLocalPackage)) {
+
+                            $NormalisedPatchPath = [System.IO.Path]::GetFullPath(
+                                $PatchLocalPackage.Trim()
+                            )
+
+                            [void]$SafeFiles.Add(
+                                $NormalisedPatchPath
+                            )
+
+                            $PatchCount++
+                        }
+                    }
+                    catch {
+
+                        $PatchErrorCount++
+
+                        Write-Log `
+                            "Unable to query patch $PatchCode for product $ProductName ($ProductCode): $($_.Exception.Message)" `
+                            "Warning"
+                    }
                 }
             }
             catch {
 
                 $PatchErrorCount++
+
+                Write-Log `
+                    "Unable to enumerate patches for $ProductName ($ProductCode): $($_.Exception.Message)" `
+                    "Warning"
             }
-        }
-
-        Write-Log "Registered MSP LocalPackage entries found: $PatchCount"
-
-        if ($PatchErrorCount -gt 0) {
-            Write-Log "MSP patches that could not be queried: $PatchErrorCount" "Warning"
         }
     }
     catch {
 
-        Write-Log "Patch enumeration failed: $($_.Exception.Message)" "Error"
+        $InstallerEnumerationComplete = $false
 
-        #
-        # DO NOT continue with deletion if patch enumeration fails.
-        #
-        $Installer = $null
+        Write-Log `
+            "Windows Installer product enumeration failed: $($_.Exception.Message)" `
+            "Error"
     }
 }
 
+
+# ============================================================
+# Enumeration Summary
+# ============================================================
+
+Write-Log "Registered MSI packages protected: $ProductCount"
+Write-Log "Registered MSP packages protected: $PatchCount"
+Write-Log "Unique Installer files protected: $($SafeFiles.Count)"
+
+if ($ProductErrorCount -gt 0) {
+
+    Write-Log `
+        "Product registrations with query errors: $ProductErrorCount" `
+        "Warning"
+}
+
+if ($PatchErrorCount -gt 0) {
+
+    Write-Log `
+        "Patch registrations with query errors: $PatchErrorCount" `
+        "Warning"
+}
+
+
+# ============================================================
+# Safety Decision
+# ============================================================
+
+if (-not $InstallerEnumerationComplete) {
+
+    Write-Log `
+        "Installer database enumeration was incomplete. Installer cleanup will NOT proceed." `
+        "Error"
+}
+else {
+
+    Write-Log `
+        "Installer database enumeration completed. Physical cache comparison can proceed." `
+        "Info"
+}
 
 # ============================================================
 # 4. Examine Windows Installer cache
@@ -298,7 +369,7 @@ $DeletedBytes         = [int64]0
 $SkippedAgeCount      = 0
 $FailedCount          = 0
 
-if ($null -eq $Installer) {
+if (-not $InstallerEnumerationComplete) {
 
     Write-Log "Installer database enumeration was incomplete." "Error"
     Write-Log "Windows Installer file deletion has been skipped for safety." "Warning"
